@@ -69,7 +69,12 @@
         </div>
       </div>
 
-      <section class="card">
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="downloader">Downloader</button>
+        <button class="tab-btn" data-tab="scraper">Page Scraper</button>
+      </div>
+
+      <section id="downloaderTab" class="card">
         <label for="url">Media URL</label>
         <input id="url" type="text" placeholder="Paste video/audio page URL from a supported website" />
         <p class="field-help">Paste the page link that contains the media you want to download.</p>
@@ -127,6 +132,30 @@
         <p id="status" class="status"></p>
       </section>
     </main>
+
+      <section id="scraperTab" class="card hidden">
+        <label for="scrapeUrl">Website URL</label>
+        <input id="scrapeUrl" type="text" placeholder="https://example.com/page-with-media" />
+        <p class="field-help">Enter any webpage URL to find all images, videos, audio, documents, CAD files, and archives on that page.</p>
+
+        <div class="actions-row">
+          <button id="scanBtn" type="button">Scan Page</button>
+          <p class="field-help">Fetches the page and lists every media file it contains.</p>
+        </div>
+
+        <div id="scraperResults" class="hidden">
+          <div class="scraper-toolbar">
+            <div id="scraperFilters" class="scraper-filters"></div>
+            <div class="scraper-bulk-actions">
+              <button id="selectAllBtn" type="button">Select All</button>
+              <button id="deselectAllBtn" type="button">Deselect All</button>
+            </div>
+          </div>
+          <div id="mediaGrid" class="media-grid"></div>
+          <button id="downloadSelectedBtn" type="button" class="primary">Download Selected</button>
+          <p id="scraperStatus" class="status"></p>
+        </div>
+      </section>
 
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>

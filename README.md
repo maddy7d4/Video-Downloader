@@ -60,6 +60,10 @@ This repo is ready for Docker deploy on Render.
 3. Select your GitHub repo (Render will detect `render.yaml`).
 4. Deploy.
 
-Render will build from `Dockerfile`, install `ffmpeg`, and run:
+Render will build from `Dockerfile`, install `ffmpeg`, and run Gunicorn with a **180s worker timeout** so media metadata and downloads are less likely to be cut off (the default 30s often breaks “fetch info” on cloud hosts).
 
-`gunicorn -w 2 -b 0.0.0.0:$PORT run:app`
+### If “Fetch” / preview fails on Render
+
+- **Timeouts:** Free-tier edge limits still apply; very slow sites may fail even with a longer Gunicorn timeout.
+- **Cloud IP blocking:** Some sites block datacenter IPs. The app uses a public **oEmbed** fallback when full metadata extraction fails, so preview may still work for common hosts (title/thumbnail; duration may be missing until download).
+- **Logs:** In the Render dashboard, open your service → **Logs** to see worker crashes or 502s.

@@ -6,7 +6,10 @@ import zipfile
 from datetime import date
 from pathlib import Path
 
-from flask import Flask, after_this_request, jsonify, render_template, request, send_file, url_for
+import requests as http_client
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlsplit, urlunsplit, quote
+from flask import Flask, Response, after_this_request, jsonify, render_template, request, send_file, stream_with_context, url_for
 from yt_dlp import YoutubeDL
 
 
@@ -74,17 +77,87 @@ def ensure_ffmpeg_exists() -> None:
         raise RuntimeError("ffmpeg is not installed or not in PATH.")
 
 
+def get_info_ydl_opts() -> dict:
+    """Tighter timeouts and fewer retries so /api/info finishes before proxy/worker limits."""
+    opts = {**get_base_ydl_opts(), "skip_download": True}
+    opts["socket_timeout"] = 25
+    opts["retries"] = 2
+    opts["fragment_retries"] = 2
+    return opts
+
+
+def try_oembed_metadata(url: str) -> dict | None:
+    """
+    Public oEmbed APIs often work from cloud hosts when full extraction is blocked or slow.
+    Duration may be missing for some providers.
+    """
+    try:
+        netloc = urlsplit(url).netloc.lower()
+    except Exception:
+        return None
+
+    candidates: list[tuple[str, dict]] = []
+    if any(x in netloc for x in ("youtube.com", "youtu.be", "youtube-nocookie.com")):
+        candidates.append(
+            ("https://www.youtube.com/oembed", {"url": url, "format": "json"}),
+        )
+    if "vimeo.com" in netloc:
+        candidates.append(("https://vimeo.com/api/oembed.json", {"url": url}))
+
+    headers = {"User-Agent": "ClipFetchStudio/1.0 (metadata preview)"}
+    for api, params in candidates:
+        try:
+            resp = http_client.get(api, params=params, timeout=(5, 14), headers=headers)
+            if not resp.ok:
+                continue
+            data = resp.json()
+            thumb = data.get("thumbnail_url") or data.get("thumbnail_url_with_play_button")
+            duration = data.get("duration")
+            if duration is not None and not isinstance(duration, (int, float)):
+                duration = None
+            return {
+                "title": data.get("title"),
+                "duration": int(duration) if duration is not None else None,
+                "thumbnail": thumb,
+                "uploader": data.get("author_name"),
+            }
+        except Exception:
+            continue
+    return None
+
+
 def get_video_info(url: str) -> dict:
-    ydl_opts = get_base_ydl_opts()
-    ydl_opts["skip_download"] = True
-    with YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-    return {
-        "title": info.get("title"),
-        "duration": info.get("duration"),
-        "thumbnail": info.get("thumbnail"),
-        "uploader": info.get("uploader"),
-    }
+    core: dict | None = None
+    try:
+        with YoutubeDL(get_info_ydl_opts()) as ydl:
+            info = ydl.extract_info(url, download=False)
+        thumbs = info.get("thumbnails") or []
+        thumb = info.get("thumbnail") or (thumbs[-1].get("url") if thumbs else None)
+        core = {
+            "title": info.get("title"),
+            "duration": info.get("duration"),
+            "thumbnail": thumb,
+            "uploader": info.get("uploader") or info.get("channel"),
+        }
+    except Exception:
+        pass
+
+    if core and core.get("title"):
+        return core
+
+    oembed = try_oembed_metadata(url)
+    if oembed and (oembed.get("title") or oembed.get("thumbnail")):
+        return {
+            "title": oembed.get("title") or (core or {}).get("title"),
+            "duration": (core or {}).get("duration") if core else oembed.get("duration"),
+            "thumbnail": oembed.get("thumbnail") or (core or {}).get("thumbnail"),
+            "uploader": oembed.get("uploader") or (core or {}).get("uploader"),
+        }
+
+    if core:
+        return core
+
+    raise ValueError("Could not fetch media metadata for this URL.")
 
 
 def run_ffmpeg_trim(
@@ -400,6 +473,129 @@ def api_download():
         return jsonify({"error": "ffmpeg processing failed. Check trim values and try again."}), 500
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "Download failed for this URL. Please try another supported website or try again later."}), 400
+
+
+_MEDIA_EXTENSIONS = {
+    "jpg": "image", "jpeg": "image", "png": "image", "gif": "image",
+    "webp": "image", "svg": "image", "bmp": "image", "ico": "image",
+    "tiff": "image", "avif": "image",
+    "mp4": "video", "webm": "video", "avi": "video", "mov": "video",
+    "mkv": "video", "flv": "video", "m4v": "video", "ogv": "video",
+    "mp3": "audio", "wav": "audio", "m4a": "audio", "ogg": "audio",
+    "flac": "audio", "aac": "audio",
+    "pdf": "document",
+    "dwg": "cad", "dxf": "cad", "step": "cad", "stp": "cad",
+    "stl": "cad", "obj": "cad", "fbx": "cad", "iges": "cad", "igs": "cad",
+    "zip": "archive", "rar": "archive", "7z": "archive", "tar": "archive", "gz": "archive",
+}
+
+
+@app.post("/api/scrape")
+def api_scrape():
+    data = request.get_json(force=True)
+    url = (data.get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "URL is required."}), 400
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+    }
+    try:
+        resp = http_client.get(url, timeout=15, headers=headers)
+        resp.raise_for_status()
+    except http_client.exceptions.Timeout:
+        return jsonify({"error": "Request timed out. The page took too long to respond."}), 400
+    except http_client.exceptions.ConnectionError:
+        return jsonify({"error": "Could not connect to that URL. Check the address and try again."}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Failed to fetch page: {exc}"}), 400
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    found = {}
+
+    def _ext(href):
+        clean = href.split("?")[0].split("#")[0].lower()
+        return clean.rsplit(".", 1)[-1] if "." in clean else ""
+
+    def add(href, forced_type=None):
+        if not href or href.startswith(("data:", "javascript:", "mailto:", "#")):
+            return
+        full = urljoin(url, href)
+        if full in found:
+            return
+        media_type = forced_type or _MEDIA_EXTENSIONS.get(_ext(full))
+        if media_type:
+            name = full.split("/")[-1].split("?")[0] or "file"
+            found[full] = {"url": full, "type": media_type, "name": name}
+
+    for tag in soup.find_all("img"):
+        add(tag.get("src"), "image")
+        for part in (tag.get("srcset") or "").split(","):
+            p = part.strip().split()
+            if p:
+                add(p[0], "image")
+
+    for tag in soup.find_all("video"):
+        add(tag.get("src"), "video")
+        for s in tag.find_all("source"):
+            add(s.get("src"), "video")
+
+    for tag in soup.find_all("audio"):
+        add(tag.get("src"), "audio")
+        for s in tag.find_all("source"):
+            add(s.get("src"), "audio")
+
+    for tag in soup.find_all("a", href=True):
+        add(tag["href"])
+
+    return jsonify({"media": list(found.values()), "count": len(found)})
+
+
+def _encode_url(url: str) -> str:
+    """Percent-encode non-ASCII characters in a URL while preserving already-encoded sequences."""
+    try:
+        parts = urlsplit(url)
+        safe_path = quote(parts.path, safe="/:@!$&'()*+,;=~-._")
+        safe_query = quote(parts.query, safe="=&+:@!$'()*,;~-._/?")
+        return urlunsplit((parts.scheme, parts.netloc, safe_path, safe_query, parts.fragment))
+    except Exception:
+        return url
+
+
+@app.get("/api/proxy-download")
+def proxy_download():
+    file_url = request.args.get("url", "").strip()
+    filename = request.args.get("name", "").strip()
+    if not file_url:
+        return jsonify({"error": "URL required."}), 400
+
+    try:
+        r = http_client.get(
+            _encode_url(file_url),
+            stream=True,
+            timeout=30,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+        )
+        r.raise_for_status()
+        content_type = r.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
+        if not filename:
+            filename = file_url.split("/")[-1].split("?")[0] or "download"
+
+        def generate():
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+
+        response = Response(stream_with_context(generate()), content_type=content_type)
+        response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+    except Exception:
+        return jsonify({"error": "Failed to download file."}), 400
 
 
 if __name__ == "__main__":

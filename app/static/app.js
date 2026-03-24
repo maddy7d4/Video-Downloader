@@ -256,3 +256,164 @@ themeToggleBtn.addEventListener("click", () => {
 renderQualityOptions();
 renderFormatOptions();
 applyTheme(localStorage.getItem("clipfetch-theme") || "light");
+
+// ── Tab switching ──────────────────────────────────────────────
+const tabBtns = document.querySelectorAll(".tab-btn");
+const downloaderTabEl = document.getElementById("downloaderTab");
+const scraperTabEl = document.getElementById("scraperTab");
+
+tabBtns.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    tabBtns.forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    const tab = btn.dataset.tab;
+    downloaderTabEl.classList.toggle("hidden", tab !== "downloader");
+    scraperTabEl.classList.toggle("hidden", tab !== "scraper");
+  });
+});
+
+// ── Page Scraper ───────────────────────────────────────────────
+const scrapeUrlInput = document.getElementById("scrapeUrl");
+const scanBtn = document.getElementById("scanBtn");
+const scraperResults = document.getElementById("scraperResults");
+const scraperFilters = document.getElementById("scraperFilters");
+const mediaGrid = document.getElementById("mediaGrid");
+const downloadSelectedBtn = document.getElementById("downloadSelectedBtn");
+const scraperStatusEl = document.getElementById("scraperStatus");
+
+let allMedia = [];
+let activeFilter = "all";
+
+const TYPE_LABELS = { image: "Image", video: "Video", audio: "Audio", document: "Document", cad: "CAD", archive: "Archive" };
+const TYPE_ICONS  = { image: "IMG", video: "VID", audio: "AUD", document: "PDF", cad: "CAD", archive: "ZIP" };
+
+function setScraperStatus(msg, type = "") {
+  scraperStatusEl.textContent = msg;
+  scraperStatusEl.className = "status" + (type ? " " + type : "");
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function renderFilters() {
+  const counts = {};
+  allMedia.forEach((m) => { counts[m.type] = (counts[m.type] || 0) + 1; });
+  const types = Object.keys(counts);
+
+  scraperFilters.innerHTML = [
+    `<button class="filter-btn${activeFilter === "all" ? " active" : ""}" data-filter="all">All (${allMedia.length})</button>`,
+    ...types.map((t) => `<button class="filter-btn${activeFilter === t ? " active" : ""}" data-filter="${t}">${TYPE_LABELS[t] || t} (${counts[t]})</button>`),
+  ].join("");
+
+  scraperFilters.querySelectorAll(".filter-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      activeFilter = btn.dataset.filter;
+      renderFilters();
+      renderGrid();
+    });
+  });
+}
+
+function renderGrid() {
+  const items = activeFilter === "all" ? allMedia : allMedia.filter((m) => m.type === activeFilter);
+  if (items.length === 0) {
+    mediaGrid.innerHTML = `<p class="scraper-empty">No ${activeFilter === "all" ? "" : (TYPE_LABELS[activeFilter] || activeFilter) + " "}files found.</p>`;
+    return;
+  }
+  mediaGrid.innerHTML = items
+    .map((item) => {
+      const icon = TYPE_ICONS[item.type] || "FILE";
+      const preview =
+        item.type === "image"
+          ? `<img src="${escapeHtml(item.url)}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='<span class=media-icon>${icon}</span>'" />`
+          : `<span class="media-icon">${icon}</span>`;
+      return `<div class="media-item" data-url="${escapeHtml(item.url)}" data-name="${escapeHtml(item.name)}">
+        <label class="media-check-wrap"><input type="checkbox" class="media-item-check" /></label>
+        <div class="media-preview">${preview}</div>
+        <div class="media-meta">
+          <span class="media-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
+          <span class="type-badge type-${item.type}">${TYPE_LABELS[item.type] || item.type}</span>
+        </div>
+      </div>`;
+    })
+    .join("");
+}
+
+async function scanPage() {
+  const url = scrapeUrlInput.value.trim();
+  if (!url) { setScraperStatus("Please enter a URL.", "error"); return; }
+
+  setScraperStatus("Scanning page...", "loading");
+  scanBtn.disabled = true;
+  scanBtn.textContent = "Scanning...";
+  scraperResults.classList.add("hidden");
+  showFunLoader("Scanning page for media...");
+
+  try {
+    const res = await fetch("/api/scrape", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Scan failed.");
+
+    allMedia = data.media || [];
+    activeFilter = "all";
+
+    if (allMedia.length === 0) {
+      setScraperStatus("No media files found on this page.", "error");
+    } else {
+      setScraperStatus(`Found ${allMedia.length} media file${allMedia.length !== 1 ? "s" : ""}.`, "success");
+      scraperResults.classList.remove("hidden");
+      renderFilters();
+      renderGrid();
+    }
+  } catch (err) {
+    setScraperStatus(err.message, "error");
+  } finally {
+    scanBtn.disabled = false;
+    scanBtn.textContent = "Scan Page";
+    hideFunLoader();
+  }
+}
+
+async function downloadSelected() {
+  const checked = [...document.querySelectorAll(".media-item-check:checked")];
+  if (checked.length === 0) { setScraperStatus("Select at least one file to download.", "error"); return; }
+
+  downloadSelectedBtn.disabled = true;
+  setScraperStatus(`Downloading ${checked.length} file${checked.length !== 1 ? "s" : ""}...`, "loading");
+
+  for (let i = 0; i < checked.length; i++) {
+    const item = checked[i].closest(".media-item");
+    const fileUrl = item.dataset.url;
+    const name = item.dataset.name;
+    const safeUrl = fileUrl.split("").map((c) => c.charCodeAt(0) > 127 ? encodeURIComponent(c) : c).join("");
+    const safeName = name.split("").map((c) => c.charCodeAt(0) > 127 ? encodeURIComponent(c) : c).join("");
+    const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(safeUrl)}&name=${encodeURIComponent(safeName)}`;
+    const a = document.createElement("a");
+    a.href = proxyUrl;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    if (i < checked.length - 1) await new Promise((r) => setTimeout(r, 600));
+  }
+
+  setScraperStatus("Downloads started. Check your downloads folder.", "success");
+  downloadSelectedBtn.disabled = false;
+}
+
+scanBtn.addEventListener("click", scanPage);
+scrapeUrlInput.addEventListener("keydown", (e) => { if (e.key === "Enter") scanPage(); });
+downloadSelectedBtn.addEventListener("click", downloadSelected);
+document.getElementById("selectAllBtn").addEventListener("click", () => {
+  document.querySelectorAll(".media-item-check").forEach((cb) => (cb.checked = true));
+});
+document.getElementById("deselectAllBtn").addEventListener("click", () => {
+  document.querySelectorAll(".media-item-check").forEach((cb) => (cb.checked = false));
+});

@@ -16,4 +16,5 @@ COPY . .
 ENV PORT=5000
 EXPOSE 5000
 
-CMD ["sh", "-c", "gunicorn -w 2 -b 0.0.0.0:${PORT} run:app"]
+# Longer timeout: yt-dlp info/download can exceed Gunicorn's default 30s on small hosts (e.g. Render).
+CMD ["sh", "-c", "gunicorn -w 2 -b 0.0.0.0:${PORT} --timeout 180 --graceful-timeout 60 run:app"]

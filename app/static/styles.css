@@ -521,3 +521,203 @@ button:disabled {
     flex-direction: column;
   }
 }
+
+/* ── Tabs ──────────────────────────────────────────────────── */
+.tab-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.tab-btn.active {
+  background: var(--primary-bg);
+  border-color: var(--primary-border);
+  color: #fff;
+}
+
+.tab-btn:not(.active):hover {
+  background: var(--btn-hover);
+  color: var(--text);
+}
+
+/* ── Scraper toolbar ───────────────────────────────────────── */
+.scraper-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 14px 0 10px;
+}
+
+.scraper-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.filter-btn {
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+}
+
+.filter-btn.active {
+  background: var(--primary-bg);
+  border-color: var(--primary-border);
+  color: #fff;
+}
+
+.filter-btn:not(.active):hover {
+  background: var(--btn-hover);
+  color: var(--text);
+}
+
+.scraper-bulk-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.scraper-empty {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  padding: 24px 0;
+}
+
+/* ── Media grid ────────────────────────────────────────────── */
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.media-item {
+  position: relative;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.media-item:has(.media-item-check:checked) {
+  border-color: var(--primary-bg);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-bg) 35%, transparent);
+}
+
+.media-check-wrap {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  cursor: pointer;
+}
+
+.media-check-wrap input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--primary-bg);
+}
+
+.media-preview {
+  width: 100%;
+  height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card-border);
+  overflow: hidden;
+}
+
+.media-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.media-icon {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.media-meta {
+  padding: 6px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.media-name {
+  font-size: 11.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.type-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.3px;
+  width: fit-content;
+}
+
+.type-image   { background: #dbeafe; color: #1d4ed8; }
+.type-video   { background: #ede9fe; color: #6d28d9; }
+.type-audio   { background: #dcfce7; color: #15803d; }
+.type-document{ background: #fee2e2; color: #b91c1c; }
+.type-cad     { background: #ffedd5; color: #c2410c; }
+.type-archive { background: #f3f4f6; color: #374151; }
+
+[data-theme="dark"] .type-image    { background: #1e3a5f; color: #93c5fd; }
+[data-theme="dark"] .type-video    { background: #2e1065; color: #c4b5fd; }
+[data-theme="dark"] .type-audio    { background: #14532d; color: #86efac; }
+[data-theme="dark"] .type-document { background: #450a0a; color: #fca5a5; }
+[data-theme="dark"] .type-cad      { background: #431407; color: #fdba74; }
+[data-theme="dark"] .type-archive  { background: #1f2937; color: #9ca3af; }
+
+@media (max-width: 700px) {
+  .scraper-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .media-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+}
