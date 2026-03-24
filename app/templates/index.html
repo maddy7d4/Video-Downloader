@@ -20,8 +20,12 @@
     <meta name="twitter:description" content="{{ seo.description }}" />
     <meta name="twitter:image" content="{{ seo.og_image }}" />
 
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -32,11 +36,7 @@
         "description": "{{ seo.description }}",
         "url": "{{ seo.canonical_url }}",
         "image": "{{ seo.og_image }}",
-        "offers": {
-          "@type": "Offer",
-          "price": "0",
-          "priceCurrency": "USD"
-        }
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
       }
     </script>
   </head>
@@ -53,94 +53,112 @@
           <span class="spark s2"></span>
           <span class="spark s3"></span>
         </div>
-        <p id="funLoaderText">Processing request...</p>
+        <p id="funLoaderText">Processing...</p>
       </div>
     </div>
 
-    <main class="container">
-      <div class="topbar">
-        <button id="themeToggleBtn" type="button">Dark Mode</button>
-      </div>
-      <div class="brand">
-        <img src="{{ url_for('static', filename='logo.svg') }}" alt="ClipFetch Studio logo" />
-        <div>
-          <h1>ClipFetch Studio</h1>
-          <p class="subtitle">Smart video and audio downloader with trim, format, and quality controls.</p>
+    <header class="site-header">
+      <div class="header-inner">
+        <div class="brand">
+          <img src="{{ url_for('static', filename='logo.svg') }}" alt="ClipFetch Studio logo" />
+          <div>
+            <h1>ClipFetch Studio</h1>
+            <p class="subtitle">Download &amp; convert media from the web</p>
+          </div>
         </div>
+        <button id="themeToggleBtn" class="theme-btn" type="button" aria-label="Switch to dark mode">
+          <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+          <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"/>
+            <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+            <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+        </button>
       </div>
+    </header>
 
+    <main class="container">
       <div class="tab-bar">
         <button class="tab-btn active" data-tab="downloader">Downloader</button>
         <button class="tab-btn" data-tab="scraper">Page Scraper</button>
       </div>
 
       <section id="downloaderTab" class="card">
-        <label for="url">Media URL</label>
-        <input id="url" type="text" placeholder="Paste video/audio page URL from a supported website" />
-        <p class="field-help">Paste the page link that contains the media you want to download.</p>
-
-        <div class="actions-row">
-          <button id="fetchInfoBtn" type="button">Fetch Video Info</button>
-          <p class="field-help">Checks the link and loads title, duration, and thumbnail.</p>
+        <div class="field">
+          <label for="url">Video or Audio URL</label>
+          <div class="input-action-row">
+            <input id="url" type="text" placeholder="Paste a link from YouTube, Twitter, Instagram&hellip;" />
+            <button id="fetchInfoBtn" type="button">Fetch Info</button>
+          </div>
         </div>
 
         <div id="videoInfo" class="video-info hidden"></div>
 
-        <fieldset class="mode-group">
-          <legend>Download Type</legend>
-          <label><input type="radio" name="mode" value="video" checked /> Video (MP4)</label>
-          <label><input type="radio" name="mode" value="audio" /> Audio only (MP3)</label>
-          <p class="field-help">Choose whether you want full video or only sound output.</p>
-        </fieldset>
-
-        <div>
-          <label for="qualitySelect">Quality</label>
-          <select id="qualitySelect"></select>
-          <p class="field-help">Higher quality gives better output but may increase processing time.</p>
-        </div>
-        <div>
-          <label for="formatSelect">Output Format</label>
-          <select id="formatSelect"></select>
-          <p class="field-help">Select the final file type to download (for example MP4, MP3, WEBM).</p>
+        <div class="mode-toggle" role="group" aria-label="Download type">
+          <label class="mode-option">
+            <input type="radio" name="mode" value="video" checked />
+            <span>Video (MP4)</span>
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="mode" value="audio" />
+            <span>Audio only</span>
+          </label>
         </div>
 
-        <div>
-          <label for="filenamePrefix">Filename prefix (optional)</label>
+        <div class="field-row">
+          <div class="field">
+            <label for="qualitySelect">Quality</label>
+            <select id="qualitySelect"></select>
+          </div>
+          <div class="field">
+            <label for="formatSelect">Format</label>
+            <select id="formatSelect"></select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="filenamePrefix">
+            Filename prefix
+            <span class="label-optional">optional</span>
+          </label>
           <input id="filenamePrefix" type="text" placeholder="e.g. my_project" />
-          <p class="field-help">Adds custom text at the beginning of the downloaded file name.</p>
         </div>
 
         <div class="trim-toggle-wrap">
-          <label><input id="enableTrim" type="checkbox" /> Enable trim</label>
-          <p class="field-help">Turn this on only if you want to cut a specific segment.</p>
+          <label class="trim-toggle-label">
+            <input id="enableTrim" type="checkbox" />
+            Enable trim
+          </label>
         </div>
 
         <div id="trimPanel" class="trim-panel hidden">
           <div class="trim-header">
-            <span>Trim Range (optional)</span>
-            <span id="trimReadout">0:00 - 0:00</span>
+            <span>Trim range</span>
+            <span id="trimReadout" class="trim-readout">0:00 &mdash; 0:00</span>
           </div>
           <div class="slider-wrap">
-            <input id="startSlider" type="range" min="0" max="0" value="0" step="1" />
-            <input id="endSlider" type="range" min="0" max="0" value="0" step="1" />
+            <input id="startSlider" type="range" min="0" max="0" value="0" step="1" aria-label="Start time" />
+            <input id="endSlider" type="range" min="0" max="0" value="0" step="1" aria-label="End time" />
           </div>
-          <p class="field-help">Drag left and right handles to cut the exact portion you want.</p>
+          <p class="field-hint">Drag the handles to select the segment you want.</p>
         </div>
 
         <button id="downloadBtn" type="button" class="primary">Download</button>
-        <p class="field-help">Starts processing and then saves the final file to your device.</p>
         <p id="status" class="status"></p>
       </section>
-    </main>
 
       <section id="scraperTab" class="card hidden">
-        <label for="scrapeUrl">Website URL</label>
-        <input id="scrapeUrl" type="text" placeholder="https://example.com/page-with-media" />
-        <p class="field-help">Enter any webpage URL to find all images, videos, audio, documents, CAD files, and archives on that page.</p>
-
-        <div class="actions-row">
-          <button id="scanBtn" type="button">Scan Page</button>
-          <p class="field-help">Fetches the page and lists every media file it contains.</p>
+        <div class="field">
+          <label for="scrapeUrl">Website URL</label>
+          <div class="input-action-row">
+            <input id="scrapeUrl" type="text" placeholder="https://example.com/page-with-media" />
+            <button id="scanBtn" type="button">Scan Page</button>
+          </div>
+          <p class="field-hint">Finds all images, videos, audio, documents, CAD files, and archives on the page.</p>
         </div>
 
         <div id="scraperResults" class="hidden">
@@ -156,6 +174,11 @@
           <p id="scraperStatus" class="status"></p>
         </div>
       </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>ClipFetch Studio &mdash; Free, open media downloader &amp; converter</p>
+    </footer>
 
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>

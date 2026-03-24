@@ -65,7 +65,7 @@ function applyTheme(theme) {
   const normalized = theme === "dark" ? "dark" : "light";
   document.documentElement.setAttribute("data-theme", normalized);
   localStorage.setItem("clipfetch-theme", normalized);
-  themeToggleBtn.textContent = normalized === "dark" ? "Light Mode" : "Dark Mode";
+  themeToggleBtn.setAttribute("aria-label", normalized === "dark" ? "Switch to light mode" : "Switch to dark mode");
 }
 
 function getMode() {
@@ -284,8 +284,8 @@ const scraperStatusEl = document.getElementById("scraperStatus");
 let allMedia = [];
 let activeFilter = "all";
 
-const TYPE_LABELS = { image: "Image", video: "Video", audio: "Audio", document: "Document", cad: "CAD", archive: "Archive" };
-const TYPE_ICONS  = { image: "IMG", video: "VID", audio: "AUD", document: "PDF", cad: "CAD", archive: "ZIP" };
+const TYPE_LABELS = { image: "Image", video: "Video", audio: "Audio", document: "Doc", cad: "3D / CAD", archive: "Archive" };
+const TYPE_ICONS  = { image: "IMG", video: "VID", audio: "AUD", document: "DOC", cad: "3D", archive: "ZIP" };
 
 function setScraperStatus(msg, type = "") {
   scraperStatusEl.textContent = msg;

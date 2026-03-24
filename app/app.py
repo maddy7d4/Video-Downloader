@@ -476,18 +476,41 @@ def api_download():
 
 
 _MEDIA_EXTENSIONS = {
+    # Images
     "jpg": "image", "jpeg": "image", "png": "image", "gif": "image",
     "webp": "image", "svg": "image", "bmp": "image", "ico": "image",
-    "tiff": "image", "avif": "image",
+    "tiff": "image", "tif": "image", "avif": "image", "heic": "image", "heif": "image",
+    # Video
     "mp4": "video", "webm": "video", "avi": "video", "mov": "video",
-    "mkv": "video", "flv": "video", "m4v": "video", "ogv": "video",
+    "mkv": "video", "flv": "video", "m4v": "video", "ogv": "video", "ts": "video",
+    # Audio
     "mp3": "audio", "wav": "audio", "m4a": "audio", "ogg": "audio",
-    "flac": "audio", "aac": "audio",
-    "pdf": "document",
-    "dwg": "cad", "dxf": "cad", "step": "cad", "stp": "cad",
-    "stl": "cad", "obj": "cad", "fbx": "cad", "iges": "cad", "igs": "cad",
-    "zip": "archive", "rar": "archive", "7z": "archive", "tar": "archive", "gz": "archive",
+    "flac": "audio", "aac": "audio", "opus": "audio",
+    # Documents
+    "pdf": "document", "doc": "document", "docx": "document",
+    "xls": "document", "xlsx": "document", "ppt": "document", "pptx": "document",
+    # CAD / 3D
+    "dwg": "cad", "dxf": "cad",
+    "step": "cad", "stp": "cad", "iges": "cad", "igs": "cad",
+    "stl": "cad", "obj": "cad", "fbx": "cad",
+    "gltf": "cad", "glb": "cad",
+    "usdz": "cad", "usd": "cad",
+    "3ds": "cad", "blend": "cad",
+    "skp": "cad", "c4d": "cad",
+    "ma": "cad", "mb": "cad",
+    "3mf": "cad", "ply": "cad", "dae": "cad",
+    # Archives
+    "zip": "archive", "rar": "archive", "7z": "archive", "tar": "archive",
+    "gz": "archive", "bz2": "archive", "xz": "archive",
 }
+
+# Regex to pull media URLs out of raw script / JSON content
+_MEDIA_EXT_PATTERN = re.compile(
+    r'https?://[^\s"\'<>\\]+\.(' +
+    '|'.join(re.escape(e) for e in _MEDIA_EXTENSIONS) +
+    r')(?:[?#][^\s"\'<>\\]*)?',
+    re.IGNORECASE,
+)
 
 
 @app.post("/api/scrape")
@@ -552,6 +575,21 @@ def api_scrape():
 
     for tag in soup.find_all("a", href=True):
         add(tag["href"])
+
+    # Scan inline <script> and <script type="application/json"> content for media URLs.
+    # Many JS-heavy sites (e.g. Sketchfab) embed model/asset URLs in JSON blobs.
+    for script in soup.find_all("script"):
+        content = script.string
+        if not content:
+            continue
+        for match in _MEDIA_EXT_PATTERN.finditer(content):
+            add(match.group(0))
+
+    # Scan data-* attributes on any element (common in lazy-load and 3D viewer setups)
+    for tag in soup.find_all(True):
+        for attr, val in tag.attrs.items():
+            if attr.startswith("data-") and isinstance(val, str) and val.startswith("http"):
+                add(val)
 
     return jsonify({"media": list(found.values()), "count": len(found)})
 
