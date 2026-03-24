@@ -1,6 +1,6 @@
-# YouTube Video + Audio Downloader (with Trim)
+# ClipFetch Studio
 
-This app lets you:
+ClipFetch Studio lets you:
 - paste a YouTube link
 - choose **Video (MP4)** or **Audio only (MP3)**
 - choose quality:
@@ -12,7 +12,7 @@ This app lets you:
 - optionally trim with start/end range sliders
 - include subtitles and/or thumbnail in a ZIP bundle
 - add a custom filename prefix
-- view recent download history
+- light/dark theme toggle (saved preference)
 - download the final processed file
 
 ## Requirements
@@ -49,5 +49,4 @@ Then open:
 
 - Trimming is optional. Keep full range selected to download full media.
 - On mobile browsers, download is triggered as a direct file response so it can be saved to Files/Downloads.
-- Downloaded final files are stored in `downloads/`.
-# Video-Downloader
+- Server output files are temporary and auto-deleted after the response is sent.

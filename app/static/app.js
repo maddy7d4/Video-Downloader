@@ -13,8 +13,7 @@ const trimReadout = document.getElementById("trimReadout");
 const includeSubtitles = document.getElementById("includeSubtitles");
 const includeThumbnail = document.getElementById("includeThumbnail");
 const filenamePrefix = document.getElementById("filenamePrefix");
-const historyList = document.getElementById("historyList");
-const refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
+const themeToggleBtn = document.getElementById("themeToggleBtn");
 
 let currentDuration = 0;
 const defaultVideoQualities = ["best", "1080", "720", "480", "360"];
@@ -30,6 +29,18 @@ function setStatus(message, type = "") {
   if (type) {
     statusEl.classList.add(type);
   }
+}
+
+function setButtonLoading(button, isLoading, loadingText, idleText) {
+  button.disabled = isLoading;
+  button.textContent = isLoading ? loadingText : idleText;
+}
+
+function applyTheme(theme) {
+  const normalized = theme === "dark" ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", normalized);
+  localStorage.setItem("clipfetch-theme", normalized);
+  themeToggleBtn.textContent = normalized === "dark" ? "Light Mode" : "Dark Mode";
 }
 
 function getMode() {
@@ -84,36 +95,6 @@ function initSliders(duration) {
   syncTrimDisplay();
 }
 
-function formatBytes(bytes) {
-  const value = Number(bytes || 0);
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-function formatDateFromTs(ts) {
-  if (!ts) return "-";
-  return new Date(ts * 1000).toLocaleString();
-}
-
-async function loadHistory() {
-  try {
-    const response = await fetch("/api/history");
-    const data = await response.json();
-    const items = data.items || [];
-    if (!items.length) {
-      historyList.innerHTML = "<li>No downloads yet.</li>";
-      return;
-    }
-    historyList.innerHTML = items
-      .map((item) => `<li><strong>${item.name}</strong><br/>${formatBytes(item.size_bytes)} - ${formatDateFromTs(item.modified_ts)}</li>`)
-      .join("");
-  } catch (_err) {
-    historyList.innerHTML = "<li>Could not load history.</li>";
-  }
-}
-
 async function fetchVideoInfo() {
   const url = urlInput.value.trim();
   if (!url) {
@@ -121,8 +102,9 @@ async function fetchVideoInfo() {
     return;
   }
 
-  setStatus("Fetching video info...");
+  setStatus("Fetching video info...", "loading");
   videoInfo.classList.add("hidden");
+  setButtonLoading(fetchInfoBtn, true, "Loading...", "Fetch Video Info");
 
   try {
     const response = await fetch("/api/info", {
@@ -160,6 +142,8 @@ async function fetchVideoInfo() {
     setStatus("Video info loaded.", "success");
   } catch (error) {
     setStatus(error.message, "error");
+  } finally {
+    setButtonLoading(fetchInfoBtn, false, "Loading...", "Fetch Video Info");
   }
 }
 
@@ -197,8 +181,13 @@ function downloadMedia() {
   });
 
   // Use direct navigation so mobile browsers save to Files/Downloads flow.
+  setButtonLoading(downloadBtn, true, "Preparing download...", "Download");
+  setStatus("Preparing download, this may take a few seconds...", "loading");
   window.location.href = `/api/download?${params.toString()}`;
-  setStatus("Download started. On phone, use browser download/files prompt.", "success");
+  setTimeout(() => {
+    setButtonLoading(downloadBtn, false, "Preparing download...", "Download");
+    setStatus("Download started. On phone, use browser download/files prompt.", "success");
+  }, 2500);
 }
 
 startSlider.addEventListener("input", () => {
@@ -224,7 +213,10 @@ document.querySelectorAll("input[name='mode']").forEach((el) => {
 
 fetchInfoBtn.addEventListener("click", fetchVideoInfo);
 downloadBtn.addEventListener("click", downloadMedia);
-refreshHistoryBtn.addEventListener("click", loadHistory);
+themeToggleBtn.addEventListener("click", () => {
+  const current = document.documentElement.getAttribute("data-theme") || "light";
+  applyTheme(current === "dark" ? "light" : "dark");
+});
 renderQualityOptions();
 renderFormatOptions();
-loadHistory();
+applyTheme(localStorage.getItem("clipfetch-theme") || "light");

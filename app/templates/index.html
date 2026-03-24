@@ -3,13 +3,55 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>YouTube Video/Audio Downloader</title>
+    <title>{{ seo.title }}</title>
+    <meta name="description" content="{{ seo.description }}" />
+    <meta name="robots" content="index,follow,max-image-preview:large" />
+    <link rel="canonical" href="{{ seo.canonical_url }}" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="{{ seo.site_name }}" />
+    <meta property="og:title" content="{{ seo.title }}" />
+    <meta property="og:description" content="{{ seo.description }}" />
+    <meta property="og:url" content="{{ seo.canonical_url }}" />
+    <meta property="og:image" content="{{ seo.og_image }}" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{{ seo.title }}" />
+    <meta name="twitter:description" content="{{ seo.description }}" />
+    <meta name="twitter:image" content="{{ seo.og_image }}" />
+
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "ClipFetch Studio",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Web",
+        "description": "{{ seo.description }}",
+        "url": "{{ seo.canonical_url }}",
+        "image": "{{ seo.og_image }}",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      }
+    </script>
   </head>
   <body>
     <main class="container">
-      <h1>YouTube Downloader</h1>
-      <p class="subtitle">Download full video or audio, and trim before download.</p>
+      <div class="topbar">
+        <button id="themeToggleBtn" type="button">Dark Mode</button>
+      </div>
+      <div class="brand">
+        <img src="{{ url_for('static', filename='logo.svg') }}" alt="ClipFetch Studio logo" />
+        <div>
+          <h1>ClipFetch Studio</h1>
+          <p class="subtitle">Smart video and audio downloader with trim, format, and quality controls.</p>
+        </div>
+      </div>
 
       <section class="card">
         <label for="url">YouTube URL</label>
@@ -69,12 +111,6 @@
 
         <button id="downloadBtn" type="button" class="primary">Download</button>
         <p id="status" class="status"></p>
-      </section>
-
-      <section class="card">
-        <h3>Recent Downloads</h3>
-        <button id="refreshHistoryBtn" type="button">Refresh History</button>
-        <ul id="historyList" class="history-list"></ul>
       </section>
     </main>
 

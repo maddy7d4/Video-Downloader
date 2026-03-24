@@ -3,18 +3,17 @@ import shutil
 import subprocess
 import uuid
 import zipfile
+from datetime import date
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, after_this_request, jsonify, render_template, request, send_file, url_for
 from yt_dlp import YoutubeDL
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 TEMP_DIR = BASE_DIR / "temp"
-DOWNLOADS_DIR = BASE_DIR / "downloads"
 
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
-DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
 
@@ -114,9 +113,10 @@ def get_audio_bitrate(quality: str) -> str:
     return quality if quality in allowed else "192"
 
 
-def sanitize_filename_prefix(value: str) -> str:
+def sanitize_filename_part(value: str, max_len: int = 80) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", value.strip())
-    return cleaned[:60]
+    cleaned = re.sub(r"_+", "_", cleaned).strip("._-")
+    return cleaned[:max_len]
 
 
 def download_source(
@@ -126,7 +126,7 @@ def download_source(
     quality: str,
     download_subtitles: bool = False,
     download_thumbnail: bool = False,
-) -> tuple[Path, list[Path]]:
+) -> tuple[Path, list[Path], str]:
     out_dir = TEMP_DIR / request_id
     out_dir.mkdir(parents=True, exist_ok=True)
     out_template = str(out_dir / "%(title).120s.%(ext)s")
@@ -153,6 +153,7 @@ def download_source(
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         file_path = Path(ydl.prepare_filename(info))
+        media_title = (info.get("title") or file_path.stem or "download").strip()
 
     if mode == "video" and file_path.suffix.lower() != ".mp4":
         mp4_guess = file_path.with_suffix(".mp4")
@@ -169,7 +170,7 @@ def download_source(
         side_files.extend(out_dir.glob("*.png"))
         side_files.extend(out_dir.glob("*.webp"))
 
-    return file_path, side_files
+    return file_path, side_files, media_title
 
 
 def export_media(
@@ -203,25 +204,51 @@ def export_media(
     subprocess.run(cmd, check=True)
 
 
-def get_recent_downloads(limit: int = 20) -> list[dict]:
-    items = []
-    for path in DOWNLOADS_DIR.glob("*"):
-        if path.is_file():
-            stat = path.stat()
-            items.append(
-                {
-                    "name": path.name,
-                    "size_bytes": stat.st_size,
-                    "modified_ts": int(stat.st_mtime),
-                }
-            )
-    items.sort(key=lambda x: x["modified_ts"], reverse=True)
-    return items[:limit]
-
-
 @app.route("/")
 def index():
-    return render_template("index.html")
+    base_url = request.url_root.rstrip("/")
+    canonical_url = f"{base_url}{url_for('index')}"
+    logo_url = f"{base_url}{url_for('static', filename='logo.svg')}"
+    seo = {
+        "title": "ClipFetch Studio - YouTube Video and Audio Downloader",
+        "description": (
+            "Download YouTube videos and audio with quality options, trimming, format conversion, "
+            "subtitle support, and mobile-friendly saving."
+        ),
+        "canonical_url": canonical_url,
+        "og_image": logo_url,
+        "site_name": "ClipFetch Studio",
+    }
+    return render_template("index.html", seo=seo)
+
+
+@app.get("/robots.txt")
+def robots_txt():
+    base_url = request.url_root.rstrip("/")
+    content = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        f"Sitemap: {base_url}/sitemap.xml\n"
+    )
+    return app.response_class(content, mimetype="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    base_url = request.url_root.rstrip("/")
+    today = date.today().isoformat()
+    content = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "  <url>\n"
+        f"    <loc>{base_url}/</loc>\n"
+        f"    <lastmod>{today}</lastmod>\n"
+        "    <changefreq>weekly</changefreq>\n"
+        "    <priority>1.0</priority>\n"
+        "  </url>\n"
+        "</urlset>\n"
+    )
+    return app.response_class(content, mimetype="application/xml")
 
 
 @app.post("/api/info")
@@ -269,11 +296,6 @@ def _extract_download_payload() -> dict:
     }
 
 
-@app.get("/api/history")
-def api_history():
-    return jsonify({"items": get_recent_downloads()})
-
-
 @app.route("/api/download", methods=["GET", "POST"])
 def api_download():
     payload = _extract_download_payload()
@@ -285,7 +307,7 @@ def api_download():
     output_format = payload["output_format"] or ("mp4" if mode == "video" else "mp3")
     include_subtitles = payload["include_subtitles"] == "true"
     include_thumbnail = payload["include_thumbnail"] == "true"
-    filename_prefix = sanitize_filename_prefix(payload["filename_prefix"])
+    filename_prefix = sanitize_filename_part(payload["filename_prefix"], max_len=40)
 
     if mode not in {"video", "audio"}:
         return jsonify({"error": "Mode must be video or audio."}), 400
@@ -308,7 +330,7 @@ def api_download():
 
         ensure_ffmpeg_exists()
         request_id = uuid.uuid4().hex
-        source_file, side_files = download_source(
+        source_file, side_files, media_title = download_source(
             url,
             mode,
             request_id,
@@ -317,7 +339,9 @@ def api_download():
             download_thumbnail=include_thumbnail,
         )
 
-        file_base = f"{mode}_{request_id}"
+        title_part = sanitize_filename_part(media_title, max_len=90) or "download"
+        short_id = request_id[:8]
+        file_base = f"{title_part}_{short_id}"
         if filename_prefix:
             file_base = f"{filename_prefix}_{file_base}"
         if mode == "audio":
@@ -326,7 +350,8 @@ def api_download():
         else:
             output_name = f"{file_base}.{output_format}"
             audio_bitrate = "192"
-        output_file = DOWNLOADS_DIR / output_name
+        temp_request_dir = TEMP_DIR / request_id
+        output_file = temp_request_dir / output_name
 
         export_media(source_file, output_file, mode, output_format, start, end, audio_bitrate)
 
@@ -335,7 +360,7 @@ def api_download():
         response_mime = "audio/mpeg" if mode == "audio" else "video/mp4"
         if include_subtitles or include_thumbnail:
             bundle_name = f"{file_base}_bundle.zip"
-            bundle_path = DOWNLOADS_DIR / bundle_name
+            bundle_path = temp_request_dir / bundle_name
             with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 archive.write(output_file, arcname=output_file.name)
                 for side_file in side_files:
@@ -344,8 +369,10 @@ def api_download():
             response_name = bundle_name
             response_mime = "application/zip"
 
-        temp_request_dir = TEMP_DIR / request_id
-        shutil.rmtree(temp_request_dir, ignore_errors=True)
+        @after_this_request
+        def _cleanup_temp_files(response):
+            shutil.rmtree(temp_request_dir, ignore_errors=True)
+            return response
 
         return send_file(
             response_file,
