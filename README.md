@@ -50,3 +50,16 @@ Then open:
 - Trimming is optional. Keep full range selected to download full media.
 - On mobile browsers, download is triggered as a direct file response so it can be saved to Files/Downloads.
 - Server output files are temporary and auto-deleted after the response is sent.
+
+## Deploy (Render)
+
+This repo is ready for Docker deploy on Render.
+
+1. Push this project to GitHub.
+2. In Render, click **New +** -> **Blueprint**.
+3. Select your GitHub repo (Render will detect `render.yaml`).
+4. Deploy.
+
+Render will build from `Dockerfile`, install `ffmpeg`, and run:
+
+`gunicorn -w 2 -b 0.0.0.0:$PORT run:app`

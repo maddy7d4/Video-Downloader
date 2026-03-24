@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: clipfetch-studio
+    env: docker
+    plan: free
+    autoDeploy: true
