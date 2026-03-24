@@ -326,9 +326,10 @@ function renderGrid() {
   mediaGrid.innerHTML = items
     .map((item) => {
       const icon = TYPE_ICONS[item.type] || "FILE";
+      const thumbSrc = `/api/proxy-download?inline=1&url=${encodeURIComponent(item.url)}&name=${encodeURIComponent(item.name)}&referer=${encodeURIComponent(item.referer || "")}`;
       const preview =
         item.type === "image"
-          ? `<img src="${escapeHtml(item.url)}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='<span class=media-icon>${icon}</span>'" />`
+          ? `<img src="${thumbSrc}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='<span class=media-icon>${icon}</span>'" />`
           : `<span class="media-icon">${icon}</span>`;
       return `<div class="media-item" data-url="${escapeHtml(item.url)}" data-name="${escapeHtml(item.name)}" data-referer="${escapeHtml(item.referer || "")}">
         <label class="media-check-wrap"><input type="checkbox" class="media-item-check" /></label>
