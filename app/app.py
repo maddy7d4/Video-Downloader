@@ -8,7 +8,7 @@ from pathlib import Path
 
 import requests as http_client
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlsplit, urlunsplit, quote
+from urllib.parse import urljoin, urlsplit, urlunsplit, quote, unquote_to_bytes
 from flask import Flask, Response, after_this_request, jsonify, render_template, request, send_file, stream_with_context, url_for
 from yt_dlp import YoutubeDL
 
@@ -531,7 +531,7 @@ def api_scrape():
         media_type = forced_type or _MEDIA_EXTENSIONS.get(_ext(full))
         if media_type:
             name = full.split("/")[-1].split("?")[0] or "file"
-            found[full] = {"url": full, "type": media_type, "name": name}
+            found[full] = {"url": full, "type": media_type, "name": name, "referer": url}
 
     for tag in soup.find_all("img"):
         add(tag.get("src"), "image")
@@ -557,12 +557,29 @@ def api_scrape():
 
 
 def _encode_url(url: str) -> str:
-    """Percent-encode non-ASCII characters in a URL while preserving already-encoded sequences."""
+    """Normalize URL path encoding.
+
+    Handles three cases:
+    1. Raw non-ASCII chars in path  → percent-encode as UTF-8
+    2. Correct %E6%BC%86 encoding   → preserved unchanged
+    3. Mojibake %C3%A6%C2%BC%C2%86 → fixed back to %E6%BC%86
+       (happens when UTF-8 bytes are misread as Latin-1 code points and re-encoded)
+    """
     try:
         parts = urlsplit(url)
-        safe_path = quote(parts.path, safe="/:@!$&'()*+,;=~-._")
-        safe_query = quote(parts.query, safe="=&+:@!$'()*,;~-._/?")
-        return urlunsplit((parts.scheme, parts.netloc, safe_path, safe_query, parts.fragment))
+        # Decode all %XX sequences to raw bytes (non-%XX chars are UTF-8 encoded first)
+        raw = unquote_to_bytes(parts.path)
+        try:
+            decoded = raw.decode("utf-8")
+            non_ascii = [c for c in decoded if not c.isascii()]
+            # If every non-ASCII char fits in a single byte it's likely mojibake:
+            # UTF-8 bytes were treated as Latin-1 code points then re-encoded as UTF-8.
+            if non_ascii and all(ord(c) < 0x100 for c in non_ascii):
+                raw = decoded.encode("latin-1")  # recover original UTF-8 bytes
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            pass
+        safe_path = quote(raw, safe=b"/:@!$&'()*+,;=~-._")
+        return urlunsplit((parts.scheme, parts.netloc, safe_path, parts.query, parts.fragment))
     except Exception:
         return url
 
@@ -571,15 +588,28 @@ def _encode_url(url: str) -> str:
 def proxy_download():
     file_url = request.args.get("url", "").strip()
     filename = request.args.get("name", "").strip()
+    referer = request.args.get("referer", "").strip()
     if not file_url:
         return jsonify({"error": "URL required."}), 400
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "identity",
+    }
+    if referer:
+        headers["Referer"] = referer
+        from urllib.parse import urlparse as _urlparse
+        parsed = _urlparse(referer)
+        headers["Origin"] = f"{parsed.scheme}://{parsed.netloc}"
 
     try:
         r = http_client.get(
             _encode_url(file_url),
             stream=True,
             timeout=30,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            headers=headers,
         )
         r.raise_for_status()
         content_type = r.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
@@ -592,7 +622,8 @@ def proxy_download():
                     yield chunk
 
         response = Response(stream_with_context(generate()), content_type=content_type)
-        response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        if request.args.get("inline") != "1":
+            response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
     except Exception:
         return jsonify({"error": "Failed to download file."}), 400

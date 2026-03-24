@@ -330,7 +330,7 @@ function renderGrid() {
         item.type === "image"
           ? `<img src="${escapeHtml(item.url)}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='<span class=media-icon>${icon}</span>'" />`
           : `<span class="media-icon">${icon}</span>`;
-      return `<div class="media-item" data-url="${escapeHtml(item.url)}" data-name="${escapeHtml(item.name)}">
+      return `<div class="media-item" data-url="${escapeHtml(item.url)}" data-name="${escapeHtml(item.name)}" data-referer="${escapeHtml(item.referer || "")}">
         <label class="media-check-wrap"><input type="checkbox" class="media-item-check" /></label>
         <div class="media-preview">${preview}</div>
         <div class="media-meta">
@@ -392,9 +392,8 @@ async function downloadSelected() {
     const item = checked[i].closest(".media-item");
     const fileUrl = item.dataset.url;
     const name = item.dataset.name;
-    const safeUrl = fileUrl.split("").map((c) => c.charCodeAt(0) > 127 ? encodeURIComponent(c) : c).join("");
-    const safeName = name.split("").map((c) => c.charCodeAt(0) > 127 ? encodeURIComponent(c) : c).join("");
-    const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(safeUrl)}&name=${encodeURIComponent(safeName)}`;
+    const referer = item.dataset.referer || "";
+    const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(fileUrl)}&name=${encodeURIComponent(name)}&referer=${encodeURIComponent(referer)}`;
     const a = document.createElement("a");
     a.href = proxyUrl;
     a.download = name;
