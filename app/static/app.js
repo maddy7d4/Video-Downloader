@@ -206,18 +206,19 @@ function downloadMedia() {
     end: fullEnd ? "" : String(end),
   });
 
-  // Use direct navigation so mobile browsers save to Files/Downloads flow.
   setButtonLoading(downloadBtn, true, "Preparing download...", "Download");
   setStatus("Preparing download, this may take a few seconds...", "loading");
   showFunLoader("Preparing your download...");
   const downloadUrl = `/api/download?${params.toString()}`;
-  const popup = window.open(downloadUrl, "_blank", "noopener,noreferrer");
-  if (!popup) {
-    window.location.href = downloadUrl;
-  }
+  const a = document.createElement("a");
+  a.href = downloadUrl;
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
   setTimeout(() => {
     setButtonLoading(downloadBtn, false, "Preparing download...", "Download");
-    setStatus("Download started. On phone, use browser download/files prompt.", "success");
+    setStatus("Download started. Check your downloads folder.", "success");
     hideFunLoader();
   }, 4500);
 }
