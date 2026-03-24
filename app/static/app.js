@@ -1,0 +1,230 @@
+const urlInput = document.getElementById("url");
+const fetchInfoBtn = document.getElementById("fetchInfoBtn");
+const videoInfo = document.getElementById("videoInfo");
+const statusEl = document.getElementById("status");
+const downloadBtn = document.getElementById("downloadBtn");
+const startInput = document.getElementById("startTime");
+const endInput = document.getElementById("endTime");
+const qualitySelect = document.getElementById("qualitySelect");
+const formatSelect = document.getElementById("formatSelect");
+const startSlider = document.getElementById("startSlider");
+const endSlider = document.getElementById("endSlider");
+const trimReadout = document.getElementById("trimReadout");
+const includeSubtitles = document.getElementById("includeSubtitles");
+const includeThumbnail = document.getElementById("includeThumbnail");
+const filenamePrefix = document.getElementById("filenamePrefix");
+const historyList = document.getElementById("historyList");
+const refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
+
+let currentDuration = 0;
+const defaultVideoQualities = ["best", "1080", "720", "480", "360"];
+const defaultAudioQualities = ["320", "256", "192", "128"];
+let videoQualities = [...defaultVideoQualities];
+let audioQualities = [...defaultAudioQualities];
+let videoFormats = ["mp4", "webm"];
+let audioFormats = ["mp3", "m4a", "wav"];
+
+function setStatus(message, type = "") {
+  statusEl.textContent = message;
+  statusEl.className = "status";
+  if (type) {
+    statusEl.classList.add(type);
+  }
+}
+
+function getMode() {
+  const selected = document.querySelector("input[name='mode']:checked");
+  return selected ? selected.value : "video";
+}
+
+function formatSeconds(totalSeconds) {
+  const seconds = Math.max(0, Math.floor(Number(totalSeconds || 0)));
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  if (hours > 0) {
+    return `${hours}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+function renderQualityOptions() {
+  const mode = getMode();
+  const options = mode === "audio" ? audioQualities : videoQualities;
+  qualitySelect.innerHTML = options
+    .map((q) => {
+      if (mode === "audio") {
+        return `<option value="${q}">${q} kbps</option>`;
+      }
+      return `<option value="${q}">${q === "best" ? "Best available" : `${q}p`}</option>`;
+    })
+    .join("");
+}
+
+function renderFormatOptions() {
+  const mode = getMode();
+  const options = mode === "audio" ? audioFormats : videoFormats;
+  formatSelect.innerHTML = options.map((fmt) => `<option value="${fmt}">${fmt.toUpperCase()}</option>`).join("");
+}
+
+function syncTrimDisplay() {
+  const startValue = Number(startSlider.value || 0);
+  const endValue = Number(endSlider.value || 0);
+  startInput.value = String(startValue);
+  endInput.value = String(endValue);
+  trimReadout.textContent = `${formatSeconds(startValue)} - ${formatSeconds(endValue)}`;
+}
+
+function initSliders(duration) {
+  currentDuration = Math.max(0, Math.floor(Number(duration || 0)));
+  startSlider.max = String(currentDuration);
+  endSlider.max = String(currentDuration);
+  startSlider.value = "0";
+  endSlider.value = String(currentDuration);
+  syncTrimDisplay();
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function formatDateFromTs(ts) {
+  if (!ts) return "-";
+  return new Date(ts * 1000).toLocaleString();
+}
+
+async function loadHistory() {
+  try {
+    const response = await fetch("/api/history");
+    const data = await response.json();
+    const items = data.items || [];
+    if (!items.length) {
+      historyList.innerHTML = "<li>No downloads yet.</li>";
+      return;
+    }
+    historyList.innerHTML = items
+      .map((item) => `<li><strong>${item.name}</strong><br/>${formatBytes(item.size_bytes)} - ${formatDateFromTs(item.modified_ts)}</li>`)
+      .join("");
+  } catch (_err) {
+    historyList.innerHTML = "<li>Could not load history.</li>";
+  }
+}
+
+async function fetchVideoInfo() {
+  const url = urlInput.value.trim();
+  if (!url) {
+    setStatus("Please enter a YouTube URL.", "error");
+    return;
+  }
+
+  setStatus("Fetching video info...");
+  videoInfo.classList.add("hidden");
+
+  try {
+    const response = await fetch("/api/info", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Unable to fetch video info.");
+    }
+
+    const info = data.info;
+    videoQualities = info.video_qualities || defaultVideoQualities;
+    audioQualities = info.audio_qualities || defaultAudioQualities;
+    videoFormats = info.video_formats || ["mp4", "webm"];
+    audioFormats = info.audio_formats || ["mp3", "m4a", "wav"];
+    const duration = Number(info.duration || 0);
+    const mins = Math.floor(duration / 60);
+    const secs = duration % 60;
+    const formattedDuration = `${mins}:${String(secs).padStart(2, "0")}`;
+
+    videoInfo.innerHTML = `
+      <img src="${info.thumbnail || ""}" alt="Thumbnail" />
+      <div>
+        <p><strong>Title:</strong> ${info.title || "Unknown"}</p>
+        <p><strong>Uploader:</strong> ${info.uploader || "Unknown"}</p>
+        <p><strong>Duration:</strong> ${formattedDuration}</p>
+      </div>
+    `;
+    videoInfo.classList.remove("hidden");
+    initSliders(duration);
+    renderQualityOptions();
+    renderFormatOptions();
+    setStatus("Video info loaded.", "success");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+function downloadMedia() {
+  const url = urlInput.value.trim();
+  if (!url) {
+    setStatus("Please enter a YouTube URL.", "error");
+    return;
+  }
+
+  const mode = getMode();
+  const quality = qualitySelect.value;
+  const outputFormat = formatSelect.value;
+  const start = Number(startSlider.value || 0);
+  const end = Number(endSlider.value || 0);
+
+  if (currentDuration > 0 && end <= start) {
+    setStatus("End time must be greater than start time.", "error");
+    return;
+  }
+
+  const fullStart = start <= 0;
+  const fullEnd = currentDuration > 0 ? end >= currentDuration : true;
+
+  const params = new URLSearchParams({
+    url,
+    mode,
+    quality,
+    output_format: outputFormat,
+    include_subtitles: includeSubtitles.checked ? "true" : "false",
+    include_thumbnail: includeThumbnail.checked ? "true" : "false",
+    filename_prefix: filenamePrefix.value.trim(),
+    start: fullStart ? "" : String(start),
+    end: fullEnd ? "" : String(end),
+  });
+
+  // Use direct navigation so mobile browsers save to Files/Downloads flow.
+  window.location.href = `/api/download?${params.toString()}`;
+  setStatus("Download started. On phone, use browser download/files prompt.", "success");
+}
+
+startSlider.addEventListener("input", () => {
+  if (Number(startSlider.value) >= Number(endSlider.value)) {
+    startSlider.value = String(Math.max(0, Number(endSlider.value) - 1));
+  }
+  syncTrimDisplay();
+});
+
+endSlider.addEventListener("input", () => {
+  if (Number(endSlider.value) <= Number(startSlider.value)) {
+    endSlider.value = String(Math.min(currentDuration, Number(startSlider.value) + 1));
+  }
+  syncTrimDisplay();
+});
+
+document.querySelectorAll("input[name='mode']").forEach((el) => {
+  el.addEventListener("change", () => {
+    renderQualityOptions();
+    renderFormatOptions();
+  });
+});
+
+fetchInfoBtn.addEventListener("click", fetchVideoInfo);
+downloadBtn.addEventListener("click", downloadMedia);
+refreshHistoryBtn.addEventListener("click", loadHistory);
+renderQualityOptions();
+renderFormatOptions();
+loadHistory();

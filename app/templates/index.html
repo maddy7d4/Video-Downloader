@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YouTube Video/Audio Downloader</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>YouTube Downloader</h1>
+      <p class="subtitle">Download full video or audio, and trim before download.</p>
+
+      <section class="card">
+        <label for="url">YouTube URL</label>
+        <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=..." />
+
+        <div class="actions-row">
+          <button id="fetchInfoBtn" type="button">Fetch Video Info</button>
+        </div>
+
+        <div id="videoInfo" class="video-info hidden"></div>
+
+        <fieldset class="mode-group">
+          <legend>Download Type</legend>
+          <label><input type="radio" name="mode" value="video" checked /> Video (MP4)</label>
+          <label><input type="radio" name="mode" value="audio" /> Audio only (MP3)</label>
+        </fieldset>
+
+        <div>
+          <label for="qualitySelect">Quality</label>
+          <select id="qualitySelect"></select>
+        </div>
+        <div>
+          <label for="formatSelect">Output Format</label>
+          <select id="formatSelect"></select>
+        </div>
+
+        <div class="option-grid">
+          <label><input id="includeSubtitles" type="checkbox" /> Include subtitles (if available)</label>
+          <label><input id="includeThumbnail" type="checkbox" /> Include thumbnail image</label>
+        </div>
+        <div>
+          <label for="filenamePrefix">Filename prefix (optional)</label>
+          <input id="filenamePrefix" type="text" placeholder="e.g. my_project" />
+        </div>
+
+        <div class="trim-panel">
+          <div class="trim-header">
+            <span>Trim Range (optional)</span>
+            <span id="trimReadout">0:00 - 0:00</span>
+          </div>
+          <div class="slider-wrap">
+            <input id="startSlider" type="range" min="0" max="0" value="0" step="1" />
+            <input id="endSlider" type="range" min="0" max="0" value="0" step="1" />
+          </div>
+        </div>
+
+        <div class="trim-grid hidden">
+          <div>
+            <label for="startTime">Start (optional)</label>
+            <input id="startTime" type="text" />
+          </div>
+          <div>
+            <label for="endTime">End (optional)</label>
+            <input id="endTime" type="text" />
+          </div>
+        </div>
+
+        <button id="downloadBtn" type="button" class="primary">Download</button>
+        <p id="status" class="status"></p>
+      </section>
+
+      <section class="card">
+        <h3>Recent Downloads</h3>
+        <button id="refreshHistoryBtn" type="button">Refresh History</button>
+        <ul id="historyList" class="history-list"></ul>
+      </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
