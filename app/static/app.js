@@ -3,17 +3,18 @@ const fetchInfoBtn = document.getElementById("fetchInfoBtn");
 const videoInfo = document.getElementById("videoInfo");
 const statusEl = document.getElementById("status");
 const downloadBtn = document.getElementById("downloadBtn");
-const startInput = document.getElementById("startTime");
-const endInput = document.getElementById("endTime");
 const qualitySelect = document.getElementById("qualitySelect");
 const formatSelect = document.getElementById("formatSelect");
 const startSlider = document.getElementById("startSlider");
 const endSlider = document.getElementById("endSlider");
 const trimReadout = document.getElementById("trimReadout");
-const includeSubtitles = document.getElementById("includeSubtitles");
-const includeThumbnail = document.getElementById("includeThumbnail");
 const filenamePrefix = document.getElementById("filenamePrefix");
+const enableTrim = document.getElementById("enableTrim");
+const trimPanel = document.getElementById("trimPanel");
 const themeToggleBtn = document.getElementById("themeToggleBtn");
+const funLoader = document.getElementById("funLoader");
+const funLoaderText = document.getElementById("funLoaderText");
+const toastContainer = document.getElementById("toastContainer");
 
 let currentDuration = 0;
 const defaultVideoQualities = ["best", "1080", "720", "480", "360"];
@@ -29,11 +30,35 @@ function setStatus(message, type = "") {
   if (type) {
     statusEl.classList.add(type);
   }
+  if (type === "error" || type === "success") {
+    showToast(message, type);
+  }
+}
+
+function showToast(message, type = "success") {
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  toastContainer.appendChild(toast);
+
+  setTimeout(() => {
+    toast.classList.add("hide");
+    setTimeout(() => toast.remove(), 250);
+  }, 3200);
 }
 
 function setButtonLoading(button, isLoading, loadingText, idleText) {
   button.disabled = isLoading;
   button.textContent = isLoading ? loadingText : idleText;
+}
+
+function showFunLoader(text) {
+  funLoaderText.textContent = text || "Processing request...";
+  funLoader.classList.remove("hidden");
+}
+
+function hideFunLoader() {
+  funLoader.classList.add("hidden");
 }
 
 function applyTheme(theme) {
@@ -81,8 +106,6 @@ function renderFormatOptions() {
 function syncTrimDisplay() {
   const startValue = Number(startSlider.value || 0);
   const endValue = Number(endSlider.value || 0);
-  startInput.value = String(startValue);
-  endInput.value = String(endValue);
   trimReadout.textContent = `${formatSeconds(startValue)} - ${formatSeconds(endValue)}`;
 }
 
@@ -98,13 +121,14 @@ function initSliders(duration) {
 async function fetchVideoInfo() {
   const url = urlInput.value.trim();
   if (!url) {
-    setStatus("Please enter a YouTube URL.", "error");
+    setStatus("Please enter a media URL.", "error");
     return;
   }
 
   setStatus("Fetching video info...", "loading");
   videoInfo.classList.add("hidden");
   setButtonLoading(fetchInfoBtn, true, "Loading...", "Fetch Video Info");
+  showFunLoader("Fetching media details...");
 
   try {
     const response = await fetch("/api/info", {
@@ -144,37 +168,39 @@ async function fetchVideoInfo() {
     setStatus(error.message, "error");
   } finally {
     setButtonLoading(fetchInfoBtn, false, "Loading...", "Fetch Video Info");
+    hideFunLoader();
   }
 }
 
 function downloadMedia() {
   const url = urlInput.value.trim();
   if (!url) {
-    setStatus("Please enter a YouTube URL.", "error");
+    setStatus("Please enter a media URL.", "error");
     return;
   }
 
   const mode = getMode();
   const quality = qualitySelect.value;
   const outputFormat = formatSelect.value;
+  const trimEnabled = enableTrim.checked;
   const start = Number(startSlider.value || 0);
   const end = Number(endSlider.value || 0);
 
-  if (currentDuration > 0 && end <= start) {
+  if (trimEnabled && currentDuration > 0 && end <= start) {
     setStatus("End time must be greater than start time.", "error");
     return;
   }
 
-  const fullStart = start <= 0;
-  const fullEnd = currentDuration > 0 ? end >= currentDuration : true;
+  const fullStart = !trimEnabled || start <= 0;
+  const fullEnd = !trimEnabled || (currentDuration > 0 ? end >= currentDuration : true);
 
   const params = new URLSearchParams({
     url,
     mode,
     quality,
     output_format: outputFormat,
-    include_subtitles: includeSubtitles.checked ? "true" : "false",
-    include_thumbnail: includeThumbnail.checked ? "true" : "false",
+    include_subtitles: "false",
+    include_thumbnail: "false",
     filename_prefix: filenamePrefix.value.trim(),
     start: fullStart ? "" : String(start),
     end: fullEnd ? "" : String(end),
@@ -183,11 +209,17 @@ function downloadMedia() {
   // Use direct navigation so mobile browsers save to Files/Downloads flow.
   setButtonLoading(downloadBtn, true, "Preparing download...", "Download");
   setStatus("Preparing download, this may take a few seconds...", "loading");
-  window.location.href = `/api/download?${params.toString()}`;
+  showFunLoader("Preparing your download...");
+  const downloadUrl = `/api/download?${params.toString()}`;
+  const popup = window.open(downloadUrl, "_blank", "noopener,noreferrer");
+  if (!popup) {
+    window.location.href = downloadUrl;
+  }
   setTimeout(() => {
     setButtonLoading(downloadBtn, false, "Preparing download...", "Download");
     setStatus("Download started. On phone, use browser download/files prompt.", "success");
-  }, 2500);
+    hideFunLoader();
+  }, 4500);
 }
 
 startSlider.addEventListener("input", () => {
@@ -209,6 +241,9 @@ document.querySelectorAll("input[name='mode']").forEach((el) => {
     renderQualityOptions();
     renderFormatOptions();
   });
+});
+enableTrim.addEventListener("change", () => {
+  trimPanel.classList.toggle("hidden", !enableTrim.checked);
 });
 
 fetchInfoBtn.addEventListener("click", fetchVideoInfo);

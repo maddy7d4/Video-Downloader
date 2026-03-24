@@ -41,6 +41,22 @@
     </script>
   </head>
   <body>
+    <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+    <div id="funLoader" class="fun-loader hidden" aria-live="polite" aria-busy="true">
+      <div class="fun-loader-card">
+        <div class="orbit-wrap">
+          <span class="planet"></span>
+          <span class="ring ring-a"></span>
+          <span class="ring ring-b"></span>
+          <span class="spark s1"></span>
+          <span class="spark s2"></span>
+          <span class="spark s3"></span>
+        </div>
+        <p id="funLoaderText">Processing request...</p>
+      </div>
+    </div>
+
     <main class="container">
       <div class="topbar">
         <button id="themeToggleBtn" type="button">Dark Mode</button>
@@ -54,11 +70,13 @@
       </div>
 
       <section class="card">
-        <label for="url">YouTube URL</label>
-        <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=..." />
+        <label for="url">Media URL</label>
+        <input id="url" type="text" placeholder="Paste video/audio page URL from a supported website" />
+        <p class="field-help">Paste the page link that contains the media you want to download.</p>
 
         <div class="actions-row">
           <button id="fetchInfoBtn" type="button">Fetch Video Info</button>
+          <p class="field-help">Checks the link and loads title, duration, and thumbnail.</p>
         </div>
 
         <div id="videoInfo" class="video-info hidden"></div>
@@ -67,27 +85,32 @@
           <legend>Download Type</legend>
           <label><input type="radio" name="mode" value="video" checked /> Video (MP4)</label>
           <label><input type="radio" name="mode" value="audio" /> Audio only (MP3)</label>
+          <p class="field-help">Choose whether you want full video or only sound output.</p>
         </fieldset>
 
         <div>
           <label for="qualitySelect">Quality</label>
           <select id="qualitySelect"></select>
+          <p class="field-help">Higher quality gives better output but may increase processing time.</p>
         </div>
         <div>
           <label for="formatSelect">Output Format</label>
           <select id="formatSelect"></select>
+          <p class="field-help">Select the final file type to download (for example MP4, MP3, WEBM).</p>
         </div>
 
-        <div class="option-grid">
-          <label><input id="includeSubtitles" type="checkbox" /> Include subtitles (if available)</label>
-          <label><input id="includeThumbnail" type="checkbox" /> Include thumbnail image</label>
-        </div>
         <div>
           <label for="filenamePrefix">Filename prefix (optional)</label>
           <input id="filenamePrefix" type="text" placeholder="e.g. my_project" />
+          <p class="field-help">Adds custom text at the beginning of the downloaded file name.</p>
         </div>
 
-        <div class="trim-panel">
+        <div class="trim-toggle-wrap">
+          <label><input id="enableTrim" type="checkbox" /> Enable trim</label>
+          <p class="field-help">Turn this on only if you want to cut a specific segment.</p>
+        </div>
+
+        <div id="trimPanel" class="trim-panel hidden">
           <div class="trim-header">
             <span>Trim Range (optional)</span>
             <span id="trimReadout">0:00 - 0:00</span>
@@ -96,20 +119,11 @@
             <input id="startSlider" type="range" min="0" max="0" value="0" step="1" />
             <input id="endSlider" type="range" min="0" max="0" value="0" step="1" />
           </div>
-        </div>
-
-        <div class="trim-grid hidden">
-          <div>
-            <label for="startTime">Start (optional)</label>
-            <input id="startTime" type="text" />
-          </div>
-          <div>
-            <label for="endTime">End (optional)</label>
-            <input id="endTime" type="text" />
-          </div>
+          <p class="field-help">Drag left and right handles to cut the exact portion you want.</p>
         </div>
 
         <button id="downloadBtn" type="button" class="primary">Download</button>
+        <p class="field-help">Starts processing and then saves the final file to your device.</p>
         <p id="status" class="status"></p>
       </section>
     </main>

@@ -18,6 +18,22 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 app = Flask(__name__)
 
 
+def get_base_ydl_opts() -> dict:
+    # Extractor defaults tuned for better site compatibility.
+    return {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "retries": 5,
+        "fragment_retries": 5,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web", "tv_embedded"],
+            }
+        },
+    }
+
+
 def parse_time_to_seconds(raw_value: str) -> float | None:
     if raw_value is None:
         return None
@@ -59,11 +75,8 @@ def ensure_ffmpeg_exists() -> None:
 
 
 def get_video_info(url: str) -> dict:
-    ydl_opts = {
-        "quiet": True,
-        "skip_download": True,
-        "noplaylist": True,
-    }
+    ydl_opts = get_base_ydl_opts()
+    ydl_opts["skip_download"] = True
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
     return {
@@ -132,10 +145,8 @@ def download_source(
     out_template = str(out_dir / "%(title).120s.%(ext)s")
 
     ydl_opts = {
+        **get_base_ydl_opts(),
         "outtmpl": out_template,
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
     }
     if download_subtitles:
         ydl_opts["writesubtitles"] = True
@@ -204,16 +215,21 @@ def export_media(
     subprocess.run(cmd, check=True)
 
 
+@app.get("/health")
+def health():
+    return "", 204
+
+
 @app.route("/")
 def index():
     base_url = request.url_root.rstrip("/")
     canonical_url = f"{base_url}{url_for('index')}"
     logo_url = f"{base_url}{url_for('static', filename='logo.svg')}"
     seo = {
-        "title": "ClipFetch Studio - YouTube Video and Audio Downloader",
+        "title": "ClipFetch Studio - Universal Video and Audio Downloader",
         "description": (
-            "Download YouTube videos and audio with quality options, trimming, format conversion, "
-            "subtitle support, and mobile-friendly saving."
+            "Download videos and audio from supported websites with quality options, trimming, "
+            "format conversion, subtitle support, and mobile-friendly saving."
         ),
         "canonical_url": canonical_url,
         "og_image": logo_url,
@@ -265,7 +281,7 @@ def api_info():
         info["audio_formats"] = ["mp3", "m4a", "wav"]
         return jsonify({"info": info})
     except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": f"Failed to fetch info: {exc}"}), 400
+        return jsonify({"error": "Failed to fetch media info from this URL. Try another supported link."}), 400
 
 
 def _extract_download_payload() -> dict:
@@ -383,7 +399,7 @@ def api_download():
     except subprocess.CalledProcessError:
         return jsonify({"error": "ffmpeg processing failed. Check trim values and try again."}), 500
     except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": f"Download failed: {exc}"}), 400
+        return jsonify({"error": "Download failed for this URL. Please try another supported website or try again later."}), 400
 
 
 if __name__ == "__main__":

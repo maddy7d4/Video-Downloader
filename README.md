@@ -1,7 +1,7 @@
 # ClipFetch Studio
 
 ClipFetch Studio lets you:
-- paste a YouTube link
+- paste a supported media page link
 - choose **Video (MP4)** or **Audio only (MP3)**
 - choose quality:
   - Video: best / 1080p / 720p / 480p / 360p
