@@ -280,6 +280,7 @@ const scraperFilters = document.getElementById("scraperFilters");
 const mediaGrid = document.getElementById("mediaGrid");
 const downloadSelectedBtn = document.getElementById("downloadSelectedBtn");
 const scraperStatusEl = document.getElementById("scraperStatus");
+const cadExportFormat = document.getElementById("cadExportFormat");
 
 let allMedia = [];
 let activeFilter = "all";
@@ -331,7 +332,7 @@ function renderGrid() {
         item.type === "image"
           ? `<img src="${thumbSrc}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='<span class=media-icon>${icon}</span>'" />`
           : `<span class="media-icon">${icon}</span>`;
-      return `<div class="media-item" data-url="${escapeHtml(item.url)}" data-name="${escapeHtml(item.name)}" data-referer="${escapeHtml(item.referer || "")}">
+      return `<div class="media-item" data-url="${escapeHtml(item.url)}" data-name="${escapeHtml(item.name)}" data-type="${escapeHtml(item.type)}" data-referer="${escapeHtml(item.referer || "")}">
         <label class="media-check-wrap"><input type="checkbox" class="media-item-check" /></label>
         <div class="media-preview">${preview}</div>
         <div class="media-meta">
@@ -394,7 +395,12 @@ async function downloadSelected() {
     const fileUrl = item.dataset.url;
     const name = item.dataset.name;
     const referer = item.dataset.referer || "";
-    const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(fileUrl)}&name=${encodeURIComponent(name)}&referer=${encodeURIComponent(referer)}`;
+    const itemType = item.dataset.type || "";
+    let proxyUrl = `/api/proxy-download?url=${encodeURIComponent(fileUrl)}&name=${encodeURIComponent(name)}&referer=${encodeURIComponent(referer)}`;
+    const tryCadConversion = itemType === "cad" || itemType === "archive";
+    if (tryCadConversion && cadExportFormat && cadExportFormat.value) {
+      proxyUrl += `&cad_format=${encodeURIComponent(cadExportFormat.value)}`;
+    }
     const a = document.createElement("a");
     a.href = proxyUrl;
     a.download = name;

@@ -3,3 +3,6 @@ yt-dlp
 gunicorn
 requests
 beautifulsoup4
+trimesh
+numpy
+meshio

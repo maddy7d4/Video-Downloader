@@ -161,6 +161,22 @@
           <p class="field-hint">Finds all images, videos, audio, documents, CAD files, and archives on the page.</p>
         </div>
 
+        <div class="field">
+          <label for="cadExportFormat">CAD export (3D files only)</label>
+          <select id="cadExportFormat" aria-describedby="cadExportHint">
+            <option value="dxf" selected>DXF &mdash; open in AutoCAD / BricsCAD, then Save As DWG if needed</option>
+            <option value="step">STEP (.step)</option>
+            <option value="stl">STL (.stl)</option>
+            <option value="obj">OBJ (.obj)</option>
+            <option value="glb">GLB (.glb)</option>
+          </select>
+          <p id="cadExportHint" class="field-hint">
+            <strong>CAD</strong> and <strong>archive</strong> (ZIP) downloads use trimesh and meshio: meshes (GLB, OBJ, STL, PLY, FBX, many VTK/FEA types),
+            ZIPs containing glTF/OBJ/STL, etc. Video, audio, flat images, and some closed CAD binaries cannot become a mesh here and fall back to the original file.
+            STEP export may need extra system libraries.
+          </p>
+        </div>
+
         <div id="scraperResults" class="hidden">
           <div class="scraper-toolbar">
             <div id="scraperFilters" class="scraper-filters"></div>

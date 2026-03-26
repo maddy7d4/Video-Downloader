@@ -1,6 +1,9 @@
+import os
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
 import uuid
 import zipfile
 from datetime import date
@@ -103,6 +106,8 @@ def try_oembed_metadata(url: str) -> dict | None:
         )
     if "vimeo.com" in netloc:
         candidates.append(("https://vimeo.com/api/oembed.json", {"url": url}))
+    if "sketchfab.com" in netloc:
+        candidates.append(("https://sketchfab.com/oembed", {"url": url}))
 
     headers = {"User-Agent": "ClipFetchStudio/1.0 (metadata preview)"}
     for api, params in candidates:
@@ -499,18 +504,255 @@ _MEDIA_EXTENSIONS = {
     "skp": "cad", "c4d": "cad",
     "ma": "cad", "mb": "cad",
     "3mf": "cad", "ply": "cad", "dae": "cad",
+    # Sketchfab streamed geometry (not always a single downloadable GLB in HTML)
+    "binz": "cad",
     # Archives
     "zip": "archive", "rar": "archive", "7z": "archive", "tar": "archive",
     "gz": "archive", "bz2": "archive", "xz": "archive",
 }
 
-# Regex to pull media URLs out of raw script / JSON content
+# Regex to pull media URLs out of raw script / JSON content.
+# Does NOT exclude backslash so it survives JSON-escaped \/ sequences
+# (caller should unescape \/ → / before running this).
 _MEDIA_EXT_PATTERN = re.compile(
-    r'https?://[^\s"\'<>\\]+\.(' +
+    r'https?://[^\s"\'<>]+\.(' +
     '|'.join(re.escape(e) for e in _MEDIA_EXTENSIONS) +
-    r')(?:[?#][^\s"\'<>\\]*)?',
+    r')(?:[?#][^\s"\'<>]*)?',
     re.IGNORECASE,
 )
+
+# Sketchfab embed JSON often contains media.sketchfab.com URLs without a traditional file extension in <a href>.
+_SKETCHFAB_CDN_PATTERN = re.compile(
+    r"https://media\.sketchfab\.com/[^\s\"'<>]+",
+    re.IGNORECASE,
+)
+
+
+def extract_sketchfab_model_uid(page_url: str) -> str | None:
+    """32-char hex model id from /3d-models/...-UID or /models/UID."""
+    m = re.search(r"/models/([0-9a-f]{32})(?:/|$|\?)", page_url, re.I)
+    if m:
+        return m.group(1)
+    m = re.search(r"-([0-9a-f]{32})(?:/|$|\?)", page_url, re.I)
+    if m:
+        return m.group(1)
+    return None
+
+
+def sketchfab_cdn_assets_from_embed(model_uid: str, referer: str, headers: dict) -> list[dict]:
+    """Fetch the embed page; 3D assets are injected in JSON (not plain <video> tags)."""
+    embed_url = f"https://sketchfab.com/models/{model_uid}/embed"
+    out: list[dict] = []
+    seen: set[str] = set()
+    try:
+        r = http_client.get(embed_url, timeout=18, headers={**headers, "Referer": referer})
+        if not r.ok:
+            return out
+        text = r.text.replace("\\/", "/").replace("&#34;", '"').replace("&quot;", '"')
+        for m in _SKETCHFAB_CDN_PATTERN.finditer(text):
+            raw = m.group(0)
+            u = raw.rstrip('",;)}]\\')
+            if u in seen or len(u) < 40:
+                continue
+            seen.add(u)
+            ext = u.split("?")[0].split("#")[0].lower().rsplit(".", 1)[-1] if "." in u else ""
+            media_type = _MEDIA_EXTENSIONS.get(ext)
+            if not media_type:
+                continue
+            name = u.split("/")[-1].split("?")[0] or "file"
+            out.append({"url": u, "type": media_type, "name": name, "referer": embed_url})
+    except Exception:
+        pass
+    return out
+
+
+# Prefer these sources when rewriting a viewer-only stream (e.g. .binz) to a real mesh for CAD export.
+_MESH_CONVERT_SOURCE_EXTS: tuple[str, ...] = (
+    "glb",
+    "gltf",
+    "obj",
+    "stl",
+    "ply",
+    "dae",
+    "x3d",
+    "3ds",
+    "fbx",
+    "3mf",
+)
+
+_MESH_URL_IN_HTML_PATTERN = re.compile(
+    r"https?://[^\s\"'<>]+\.("
+    + "|".join(re.escape(e) for e in _MESH_CONVERT_SOURCE_EXTS)
+    + r")(?:[?#][^\s\"'<>]*)?",
+    re.IGNORECASE,
+)
+
+
+def _sketchfab_uid_from_media_url(url: str) -> str | None:
+    m = re.search(r"media\.sketchfab\.com/models/([0-9a-f]{32})/", url, re.I)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _mesh_candidate_from_url(url: str) -> tuple[int, str, str] | None:
+    """Score a downloadable URL if it looks like a mesh asset (any host)."""
+    if not url.startswith(("http://", "https://")):
+        return None
+    low_full = url.lower()
+    for junk in ("favicon", "/sprite", "/icons/", "apple-touch", "/widget", "/ads/"):
+        if junk in low_full:
+            return None
+    parts = urlsplit(url)
+    path = parts.path.lower()
+    host_l = parts.netloc.lower()
+    if "sketchfab.com" in host_l:
+        for noise in (
+            "/textures/",
+            "/thumbnails/",
+            "/avatars/",
+            "/backgrounds/",
+            "/environments/",
+            "/matcaps/",
+        ):
+            if noise in path:
+                return None
+    ext = path.rsplit(".", 1)[-1] if "." in path else ""
+    if ext not in _MESH_CONVERT_SOURCE_EXTS:
+        return None
+    name = url.split("/")[-1].split("?")[0] or f"model.{ext}"
+    return (_MESH_CONVERT_SOURCE_EXTS.index(ext), url, name)
+
+
+def _collect_mesh_urls_from_json(obj) -> list[tuple[int, str, str]]:
+    found: list[tuple[int, str, str]] = []
+    if isinstance(obj, dict):
+        for v in obj.values():
+            found.extend(_collect_mesh_urls_from_json(v))
+    elif isinstance(obj, list):
+        for v in obj:
+            found.extend(_collect_mesh_urls_from_json(v))
+    elif isinstance(obj, str):
+        hit = _mesh_candidate_from_url(obj)
+        if hit:
+            found.append(hit)
+    return found
+
+
+def _pick_best_mesh_candidate(raw: list[tuple[int, str, str]]) -> tuple[str, str] | None:
+    if not raw:
+        return None
+    by_url: dict[str, tuple[int, str, str]] = {}
+    for pri, u, name in raw:
+        if u not in by_url or pri < by_url[u][0]:
+            by_url[u] = (pri, u, name)
+    merged = list(by_url.values())
+    merged.sort(key=lambda t: (t[0], len(t[1])))
+    _, best_url, best_name = merged[0]
+    return (best_url, best_name)
+
+
+def _sketchfab_binz_mesh_candidates(file_url: str, referer: str, headers: dict) -> list[tuple[int, str, str]]:
+    """Sketchfab embed + /i/models JSON (only when we can resolve a model uid)."""
+    uid = _sketchfab_uid_from_media_url(file_url) or extract_sketchfab_model_uid(referer or "")
+    if not uid:
+        return []
+    base_sf_headers = {
+        "User-Agent": headers["User-Agent"],
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": referer if referer and "sketchfab.com" in referer.lower() else "https://sketchfab.com/",
+    }
+    candidates: list[tuple[int, str, str]] = []
+    embed_url = f"https://sketchfab.com/models/{uid}/embed"
+    try:
+        r = http_client.get(
+            embed_url,
+            timeout=18,
+            headers={
+                **base_sf_headers,
+                "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+            },
+        )
+        if r.ok:
+            text = r.text.replace("\\/", "/").replace("&#34;", '"').replace("&quot;", '"')
+            for m in _SKETCHFAB_CDN_PATTERN.finditer(text):
+                u = m.group(0).rstrip('",;)}]\\')
+                hit = _mesh_candidate_from_url(u)
+                if hit:
+                    candidates.append(hit)
+    except Exception:
+        pass
+
+    try:
+        ir = http_client.get(
+            f"https://sketchfab.com/i/models/{uid}",
+            timeout=14,
+            headers={**base_sf_headers, "Accept": "application/json"},
+        )
+        if ir.ok:
+            candidates.extend(_collect_mesh_urls_from_json(ir.json()))
+    except Exception:
+        pass
+    return candidates
+
+
+def discover_mesh_urls_from_referer_page(referer: str, headers: dict) -> list[tuple[int, str, str]]:
+    """Scan any referer HTML/JSON page for mesh asset URLs (works for arbitrary sites)."""
+    out: list[tuple[int, str, str]] = []
+    try:
+        rh = {
+            "User-Agent": headers["User-Agent"],
+            "Accept-Language": headers.get("Accept-Language", "en-US,en;q=0.9"),
+            "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+            "Referer": referer,
+        }
+        r = http_client.get(referer, timeout=18, headers=rh)
+        if not r.ok:
+            return out
+        text = r.text.replace("\\/", "/").replace("&#34;", '"').replace("&quot;", '"')
+        ct = r.headers.get("Content-Type", "").lower()
+        snippet = text.lstrip()[:8000]
+        if "json" in ct or snippet.startswith("{") or snippet.startswith("["):
+            try:
+                out.extend(_collect_mesh_urls_from_json(r.json()))
+            except Exception:
+                pass
+        if "html" in ct or "<html" in text[:3000].lower() or "doctype html" in text[:3000].lower():
+            for m in _MESH_URL_IN_HTML_PATTERN.finditer(text):
+                u = m.group(0).rstrip('",;)}]\\')
+                hit = _mesh_candidate_from_url(u)
+                if hit:
+                    out.append(hit)
+            try:
+                soup = BeautifulSoup(text, "html.parser")
+                for tag in soup.find_all(["a", "link", "source", "iframe"]):
+                    for attr in ("href", "src"):
+                        v = tag.get(attr)
+                        if v and isinstance(v, str) and v.startswith("http"):
+                            hit = _mesh_candidate_from_url(urljoin(referer, v.strip()))
+                            if hit:
+                                out.append(hit)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return out
+
+
+def resolve_binz_stream_to_mesh_url(file_url: str, referer: str, headers: dict) -> tuple[str, str] | None:
+    """
+    For viewer .binz streams, try to find a real mesh URL: Sketchfab APIs if applicable,
+    plus the referer page for any host (HTML links, JSON config blobs).
+    """
+    path = urlsplit(file_url).path.lower()
+    if not path.endswith(".binz"):
+        return None
+    cands: list[tuple[int, str, str]] = []
+    cands.extend(_sketchfab_binz_mesh_candidates(file_url, referer, headers))
+    ref = (referer or "").strip()
+    if ref.startswith(("http://", "https://")):
+        cands.extend(discover_mesh_urls_from_referer_page(ref, headers))
+    return _pick_best_mesh_candidate(cands)
 
 
 @app.post("/api/scrape")
@@ -576,13 +818,15 @@ def api_scrape():
     for tag in soup.find_all("a", href=True):
         add(tag["href"])
 
-    # Scan inline <script> and <script type="application/json"> content for media URLs.
-    # Many JS-heavy sites (e.g. Sketchfab) embed model/asset URLs in JSON blobs.
+    # Scan inline <script> / JSON blobs for media URLs.
+    # JSON encodes forward slashes as \/ — unescape before matching so
+    # https:\/\/cdn.example.com\/model.glb becomes a valid URL.
     for script in soup.find_all("script"):
         content = script.string
         if not content:
             continue
-        for match in _MEDIA_EXT_PATTERN.finditer(content):
+        unescaped = content.replace("\\/", "/")
+        for match in _MEDIA_EXT_PATTERN.finditer(unescaped):
             add(match.group(0))
 
     # Scan data-* attributes on any element (common in lazy-load and 3D viewer setups)
@@ -590,6 +834,33 @@ def api_scrape():
         for attr, val in tag.attrs.items():
             if attr.startswith("data-") and isinstance(val, str) and val.startswith("http"):
                 add(val)
+
+    # Sketchfab: model files load from CDN inside the embed document, not the public model page HTML.
+    if "sketchfab.com" in urlsplit(url).netloc.lower():
+        uid = extract_sketchfab_model_uid(url)
+        if not uid:
+            try:
+                oe = http_client.get(
+                    "https://sketchfab.com/oembed",
+                    params={"url": url},
+                    timeout=12,
+                    headers=headers,
+                )
+                if oe.ok:
+                    html = oe.json().get("html") or ""
+                    m = re.search(
+                        r"sketchfab\.com/models/([0-9a-f]{32})/embed",
+                        html,
+                        re.I,
+                    )
+                    if m:
+                        uid = m.group(1)
+            except Exception:
+                pass
+        if uid:
+            for item in sketchfab_cdn_assets_from_embed(uid, url, headers):
+                if item["url"] not in found:
+                    found[item["url"]] = item
 
     return jsonify({"media": list(found.values()), "count": len(found)})
 
@@ -622,11 +893,190 @@ def _encode_url(url: str) -> str:
         return url
 
 
+# (suffix, mimetype, trimesh file_type)
+CAD_EXPORT_FORMATS: dict[str, tuple[str, str, str]] = {
+    "dxf": (".dxf", "application/dxf", "dxf"),
+    "step": (".step", "application/STEP", "step"),
+    "stl": (".stl", "model/stl", "stl"),
+    "obj": (".obj", "model/obj", "obj"),
+    "glb": (".glb", "model/gltf-binary", "glb"),
+}
+
+MAX_CAD_INPUT_BYTES = 120 * 1024 * 1024
+
+
+def _run_universal_cad_export(src: str, dest: str, file_type: str) -> None:
+    """Best-effort: trimesh, meshio (VTU/VTK/MED/etc.), ZIP of glTF/OBJ, then export to the target format."""
+    import json
+
+    s_src = json.dumps(os.path.abspath(src))
+    s_dest = json.dumps(os.path.abspath(dest))
+    s_ft = json.dumps(file_type)
+    script = f"""
+import shutil
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+import numpy as np
+import trimesh
+
+
+def scene_to_mesh(loaded):
+    if loaded is None:
+        return None
+    if isinstance(loaded, trimesh.Scene):
+        parts = [g for g in loaded.geometry.values() if isinstance(g, trimesh.Trimesh)]
+        if not parts:
+            return None
+        return trimesh.util.concatenate(parts) if len(parts) > 1 else parts[0]
+    if isinstance(loaded, trimesh.Trimesh):
+        return loaded
+    return None
+
+
+def try_trimesh_load(path: Path):
+    for force in (None, "mesh", "scene"):
+        try:
+            if force is None:
+                loaded = trimesh.load(str(path), process=True)
+            else:
+                loaded = trimesh.load(str(path), force=force, process=True)
+        except (NotImplementedError, OSError, ValueError, AttributeError, TypeError):
+            loaded = None
+        except Exception:
+            loaded = None
+        mesh = scene_to_mesh(loaded)
+        if mesh is not None and not mesh.is_empty:
+            return mesh
+    return None
+
+
+def tet_boundary_triangles(tets):
+    f = np.vstack(
+        [
+            tets[:, [0, 1, 2]],
+            tets[:, [0, 1, 3]],
+            tets[:, [0, 2, 3]],
+            tets[:, [1, 2, 3]],
+        ]
+    )
+    fs = np.sort(f, axis=1)
+    u, counts = np.unique(fs, axis=0, return_counts=True)
+    return u[counts == 1]
+
+
+def mesh_from_meshio(path: Path):
+    import meshio
+
+    m = meshio.read(str(path))
+    pts = np.asarray(m.points, dtype=np.float64)
+    if pts.size == 0:
+        return None
+    cd = m.cells_dict
+    faces = None
+    if "triangle" in cd:
+        faces = np.asarray(cd["triangle"], dtype=np.int64)
+    elif "triangle6" in cd:
+        t6 = np.asarray(cd["triangle6"], dtype=np.int64)
+        faces = t6[:, :3]
+    elif "quad" in cd:
+        q = np.asarray(cd["quad"], dtype=np.int64)
+        faces = np.vstack([q[:, [0, 1, 2]], q[:, [0, 2, 3]]])
+    elif "quad8" in cd:
+        q = np.asarray(cd["quad8"], dtype=np.int64)
+        faces = np.vstack([q[:, [0, 1, 2]], q[:, [0, 2, 3]]])
+    elif "tetra" in cd:
+        tets = np.asarray(cd["tetra"], dtype=np.int64)
+        faces = tet_boundary_triangles(tets)
+    elif "tetra10" in cd:
+        tets = np.asarray(cd["tetra10"], dtype=np.int64)
+        faces = tet_boundary_triangles(tets[:, :4])
+    if faces is None or faces.size == 0:
+        return None
+    mesh = trimesh.Trimesh(vertices=pts, faces=faces, process=True)
+    return None if mesh.is_empty else mesh
+
+
+def prepare_work_path(raw: Path):
+    if raw.suffix.lower() != ".zip":
+        return raw, None
+    td = tempfile.mkdtemp()
+    try:
+        with zipfile.ZipFile(raw) as z:
+            z.extractall(td)
+    except Exception:
+        shutil.rmtree(td, ignore_errors=True)
+        return None, None
+    order = [
+        ".glb",
+        ".gltf",
+        ".obj",
+        ".stl",
+        ".ply",
+        ".dae",
+        ".x3d",
+        ".3ds",
+        ".vtk",
+        ".vtu",
+    ]
+    best = []
+    for p in Path(td).rglob("*"):
+        if not p.is_file():
+            continue
+        suf = p.suffix.lower()
+        if suf in order:
+            best.append((order.index(suf), -p.stat().st_size, p))
+    if not best:
+        shutil.rmtree(td, ignore_errors=True)
+        return None, None
+    best.sort(key=lambda x: (x[0], x[1]))
+    return best[0][2], td
+
+
+src = Path({s_src})
+dest = Path({s_dest})
+ft = {s_ft}
+tmpdir = None
+try:
+    work, tmpdir = prepare_work_path(src)
+    if work is None:
+        sys.exit(2)
+    mesh = try_trimesh_load(work)
+    if mesh is None:
+        try:
+            mesh = mesh_from_meshio(work)
+        except Exception:
+            mesh = None
+    if mesh is None and work != src:
+        mesh = try_trimesh_load(src)
+    if mesh is None:
+        try:
+            mesh = mesh_from_meshio(src)
+        except Exception:
+            mesh = None
+    if mesh is None or mesh.is_empty:
+        sys.exit(2)
+    mesh.export(str(dest), file_type=ft)
+finally:
+    if tmpdir is not None:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+"""
+    subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        timeout=240,
+    )
+
+
 @app.get("/api/proxy-download")
 def proxy_download():
     file_url = request.args.get("url", "").strip()
     filename = request.args.get("name", "").strip()
     referer = request.args.get("referer", "").strip()
+    cad_format = (request.args.get("cad_format") or "").strip().lower()
+    inline = request.args.get("inline") == "1"
     if not file_url:
         return jsonify({"error": "URL required."}), 400
 
@@ -643,8 +1093,27 @@ def proxy_download():
         headers["Origin"] = f"{parsed.scheme}://{parsed.netloc}"
 
     try:
+        if cad_format and cad_format not in CAD_EXPORT_FORMATS:
+            return jsonify({"error": "Invalid cad_format. Use dxf, step, stl, obj, or glb."}), 400
+
+        eff_url = file_url
+        cad_effective = cad_format if cad_format in CAD_EXPORT_FORMATS else ""
+        binz_cad_no_mesh_source = False
+        if cad_effective and not inline:
+            path_low = urlsplit(file_url).path.lower()
+            name_suf = Path(filename).suffix.lower() if filename else ""
+            if path_low.endswith(".binz") or name_suf == ".binz":
+                alt = resolve_binz_stream_to_mesh_url(file_url, referer, headers)
+                if alt:
+                    eff_url, mesh_name = alt
+                    filename = mesh_name
+                else:
+                    # No mesh URL on embed/API/referer: serve original .binz (conversion not possible here).
+                    cad_effective = ""
+                    binz_cad_no_mesh_source = True
+
         r = http_client.get(
-            _encode_url(file_url),
+            _encode_url(eff_url),
             stream=True,
             timeout=30,
             headers=headers,
@@ -652,17 +1121,120 @@ def proxy_download():
         r.raise_for_status()
         content_type = r.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
         if not filename:
-            filename = file_url.split("/")[-1].split("?")[0] or "download"
+            filename = eff_url.split("/")[-1].split("?")[0] or "download"
 
-        def generate():
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    yield chunk
+        if (not cad_effective) or inline:
 
-        response = Response(stream_with_context(generate()), content_type=content_type)
-        if request.args.get("inline") != "1":
-            response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-        return response
+            def generate():
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        yield chunk
+
+            response = Response(stream_with_context(generate()), content_type=content_type)
+            if not inline:
+                response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+                if binz_cad_no_mesh_source:
+                    response.headers["X-ClipFetch-CAD"] = (
+                        "skipped: no GLB/glTF/OBJ/etc. found for this .binz (check referer page)"
+                    )
+            return response
+
+        suffix, mime_out, tri_type = CAD_EXPORT_FORMATS[cad_effective]
+        dl_name = Path(filename).stem + suffix
+        src_suffix = Path(filename).suffix.lower()
+
+        tmp_in = None
+        try:
+            tmp_in = tempfile.NamedTemporaryFile(delete=False, suffix=src_suffix or ".bin")
+            total = 0
+            for chunk in r.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > MAX_CAD_INPUT_BYTES:
+                    tmp_in.close()
+                    os.unlink(tmp_in.name)
+                    return jsonify({"error": "File too large for CAD conversion."}), 400
+                tmp_in.write(chunk)
+            tmp_in.close()
+            src_path = tmp_in.name
+
+            if src_suffix == suffix:
+                resp = send_file(
+                    src_path,
+                    as_attachment=True,
+                    download_name=Path(filename).name,
+                    mimetype=mime_out,
+                )
+
+                @after_this_request
+                def _clean_same(_resp):
+                    try:
+                        os.unlink(src_path)
+                    except OSError:
+                        pass
+                    return _resp
+
+                return resp
+
+            out_fd, out_path = tempfile.mkstemp(suffix=suffix)
+            os.close(out_fd)
+            try:
+                _run_universal_cad_export(os.path.abspath(src_path), os.path.abspath(out_path), tri_type)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+                try:
+                    os.unlink(out_path)
+                except OSError:
+                    pass
+                resp = send_file(
+                    src_path,
+                    as_attachment=True,
+                    download_name=filename,
+                    mimetype=content_type,
+                )
+
+                @after_this_request
+                def _clean_fb(_resp):
+                    try:
+                        os.unlink(src_path)
+                    except OSError:
+                        pass
+                    return _resp
+
+                return resp
+            try:
+                os.unlink(src_path)
+            except OSError:
+                pass
+
+            resp = send_file(
+                out_path,
+                as_attachment=True,
+                download_name=dl_name,
+                mimetype=mime_out,
+            )
+
+            @after_this_request
+            def _clean_out(_resp):
+                try:
+                    os.unlink(out_path)
+                except OSError:
+                    pass
+                return _resp
+
+            return resp
+        except Exception:
+            if tmp_in is not None:
+                try:
+                    if not tmp_in.closed:
+                        tmp_in.close()
+                except Exception:
+                    pass
+                try:
+                    os.unlink(tmp_in.name)
+                except Exception:
+                    pass
+            return jsonify({"error": "Failed to download or convert file."}), 400
     except Exception:
         return jsonify({"error": "Failed to download file."}), 400
 
